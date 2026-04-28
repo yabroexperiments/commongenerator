@@ -530,6 +530,17 @@ npm install github:yabroexperiments/commongenerator#v0.2.0
 
 ## 11. Quick reference: "I want to build a new project that does X"
 
+0. **Pick an ASCII-only path for the project folder.** Next.js 16's
+   Turbopack production build crashes when the working directory
+   contains non-ASCII characters (e.g. Chinese folder names). This
+   is a Turbopack bug — they slice paths by byte index instead of
+   char index, which lands inside multi-byte UTF-8 chars and panics.
+   `npm run dev` is unaffected, and Vercel's build environment is
+   ASCII-only so production deploys are fine — but local
+   `npm run build` will fail. **Always place new project folders at
+   ASCII-only paths.** Good: `~/Projects/PetBusiness/DogRating/`.
+   Bad: `~/Projects/PetBusiness/狗狗畫廊/dog-rating/`.
+
 1. Create a new Next.js 16 app (use gogo-gallery as the template
    — same stack, same patterns)
 2. Create a new Supabase project (separate from sibling apps —
