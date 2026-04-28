@@ -124,26 +124,51 @@ Retries automatically on:
 
 **Env required:** `OPENAI_API_KEY`.
 
-### `startGeneration(opts) → Promise<{ generationId }>`
+### `startGeneration(opts) → Promise<{ generationId, acceptedBy }>`
 
-Submit one image-edit task to a provider. Inserts a row into the
-`generations` table, calls `provider.submit()`, stores the upstream
-task ID, returns the row ID.
+Submit one image-edit task to a provider, with optional fallback chain.
+Inserts a row into the `generations` table, calls `provider.submit()`,
+stores the upstream task ID, returns the row ID.
 
 | Option | Default | Notes |
 |---|---|---|
 | `sb` | required | Server-side SupabaseClient (service-role key) |
 | `imageUrl` | required | Source image (public URL) |
 | `prompt` | required | Already-rendered prompt text (use `renderPrompt` first) |
-| `provider` | `"wavespeed"` | `"wavespeed"` or `"openai"` |
+| `provider` | `"wavespeed-gpt-image-2"` | Primary provider — see catalog below |
+| `fallbackProviders` | `[]` | Tried in order if primary's submit fails transiently |
 | `size` | provider default | `"1024*1024"`, `"1024x1024"`, etc. |
 | `kind` | null | Free-form tag — `"rating"`, `"gallery-renaissance"`, etc. |
 | `metadata` | null | Free-form jsonb — engine never reads it |
 | `id` | random UUID | Pre-generate if you need the ID before insert |
 
-**Env required:** depends on provider. `WAVESPEED_API_KEY` or
-`FAL_API_KEY`. Always need `NEXT_PUBLIC_SUPABASE_URL` +
-`SUPABASE_SERVICE_ROLE_KEY` for the SupabaseClient.
+**Provider catalog:**
+
+| Name | Gateway | Model | Notes |
+|---|---|---|---|
+| `wavespeed-gpt-image-2` | Wavespeed.ai | OpenAI gpt-image-2 | Default. Best for text-rich + multilingual scenes. |
+| `wavespeed-nano-banana-pro` | Wavespeed.ai | Google Nano Banana Pro | High fidelity, slower. |
+| `wavespeed-nano-banana-fast` | Wavespeed.ai | Google Nano Banana 2 Fast | Faster + cheaper tier. |
+| `fal-gpt-image-2` | Fal.ai queue | OpenAI gpt-image-2 | Same model as wavespeed-gpt-image-2 via a different gateway. Useful as a fallback. |
+
+**Recommended default for new apps:**
+```ts
+provider: "wavespeed-gpt-image-2",
+fallbackProviders: ["fal-gpt-image-2"],
+```
+
+**Fallback semantics:**
+- Transient errors (network, 5xx, 408, 429) → walk the chain.
+- Hard errors (401/403, 4xx other than 408/429, missing API key) → fail
+  fast without trying fallbacks. Config errors aren't transient.
+- Once a provider accepts the job and returns a task ID, polling
+  sticks with that provider. Task IDs are provider-specific.
+- The `generations.provider` column reflects which provider actually
+  accepted (after any fallback).
+
+**Env required:** depends on provider chain. Set every key for every
+gateway you might fall back to. Always need `NEXT_PUBLIC_SUPABASE_URL`
++ `SUPABASE_SERVICE_ROLE_KEY` for the SupabaseClient.
 
 ### `getGenerationStatus(opts) → Promise<GenerationStatusResponse>`
 
@@ -252,7 +277,7 @@ bucket is configured.
 1. Create `src/providers/<name>.ts` exporting an `ImageProvider`
 2. Add the provider name to the `ProviderName` union in `src/types.ts`
 3. Register it in `src/providers/index.ts` `REGISTRY`
-4. Update the SQL migration's `check (provider in (...))` constraint
+4. (No DB-migration step — `provider` is `text` with no check constraint; the engine validates names at the TS layer)
 5. Bump consuming apps' `commongenerator` git ref
 
 ### Choosing a provider per request
@@ -329,7 +354,7 @@ its local `resolveProvider` consults).
          metadata: body.vars,
        };
      },
-     defaultProvider: "wavespeed",
+     defaultProvider: "wavespeed-gpt-image-2",
    });
    ```
 
@@ -439,7 +464,7 @@ generations (
   original_image_url text,
   result_image_url text,
   prompt text,
-  provider text,             -- "wavespeed" | "openai"
+  provider text,             -- e.g. "wavespeed-gpt-image-2", "fal-gpt-image-2"
   provider_task_id text,     -- upstream task ID
   status text,               -- "processing" | "completed" | "failed"
   error_message text,

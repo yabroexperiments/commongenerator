@@ -13,7 +13,12 @@ create table if not exists public.generations (
   original_image_url text not null,
   result_image_url text,
   prompt text not null,
-  provider text not null check (provider in ('wavespeed', 'openai')),
+  -- The engine validates provider names at the TS layer (src/types.ts
+  -- ProviderName union). No DB-level check constraint on purpose so
+  -- the catalog can grow without DB migrations. Current valid names:
+  --   wavespeed-gpt-image-2, wavespeed-nano-banana-pro,
+  --   wavespeed-nano-banana-fast, fal-gpt-image-2.
+  provider text not null,
   -- Provider task ID (Wavespeed prediction ID, Fal request ID, etc).
   provider_task_id text,
   status text not null default 'processing'

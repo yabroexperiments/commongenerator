@@ -38,6 +38,20 @@ export async function insertGeneration(
   }
 }
 
+export async function setProvider(
+  sb: SupabaseClient,
+  id: string,
+  provider: ProviderName,
+): Promise<void> {
+  const { error } = await sb
+    .from(TABLE)
+    .update({ provider })
+    .eq("id", id);
+  if (error) {
+    throw new Error(`generations update provider failed: ${error.message}`);
+  }
+}
+
 export async function setProviderTaskId(
   sb: SupabaseClient,
   id: string,

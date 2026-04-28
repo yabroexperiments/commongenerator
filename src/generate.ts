@@ -1,6 +1,7 @@
 /**
  * The two main engine functions:
- *   - startGeneration: insert a row, submit to provider, return the row ID
+ *   - startGeneration: insert a row, submit to provider (with optional
+ *     fallback chain), return the row ID
  *   - getGenerationStatus: read the row; if still processing, poll the
  *     provider once and update the row; return the latest state
  *
@@ -17,11 +18,13 @@ import {
   insertGeneration,
   setCompleted,
   setFailed,
+  setProvider,
   setProviderTaskId,
 } from "./db";
 import { getProvider } from "./providers";
 import type {
   GenerationStatusResponse,
+  ProviderName,
   StartGenerationInput,
 } from "./types";
 
@@ -35,43 +38,82 @@ export type StartGenerationOpts = StartGenerationInput & {
 
 export type StartGenerationResult = {
   generationId: string;
+  /** Which provider in the chain actually accepted the job. Equal to
+   *  `provider` (the primary) on the happy path; differs when fallback
+   *  was used. */
+  acceptedBy: ProviderName;
 };
 
 export async function startGeneration(
   opts: StartGenerationOpts,
 ): Promise<StartGenerationResult> {
-  const providerName = opts.provider ?? "wavespeed";
-  const provider = getProvider(providerName);
   const id = opts.id ?? crypto.randomUUID();
+  const primary = opts.provider ?? "wavespeed-gpt-image-2";
+  const chain: ProviderName[] = [primary, ...(opts.fallbackProviders ?? [])];
 
-  // 1. Persist the row (status=processing) so we have a stable ID
+  // 1. Persist row with the PRIMARY provider initially. If a fallback
+  //    ends up handling it, we update the column further down.
   await insertGeneration(opts.sb, {
     id,
     kind: opts.kind,
     original_image_url: opts.imageUrl,
     prompt: opts.prompt,
-    provider: providerName,
+    provider: primary,
     metadata: opts.metadata,
   });
 
-  // 2. Submit to provider — capture failures so the row reflects them
-  let taskId: string;
-  try {
-    const result = await provider.submit({
-      imageUrl: opts.imageUrl,
-      prompt: opts.prompt,
-      size: opts.size,
-    });
-    taskId = result.taskId;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await setFailed(opts.sb, id, message);
-    throw new Error(`Provider submit failed: ${message}`);
+  // 2. Walk the chain until one provider accepts (or all fail).
+  let lastError: Error | undefined;
+  for (let i = 0; i < chain.length; i++) {
+    const providerName = chain[i]!;
+    const provider = getProvider(providerName);
+    try {
+      const { taskId } = await provider.submit({
+        imageUrl: opts.imageUrl,
+        prompt: opts.prompt,
+        size: opts.size,
+      });
+      // Update the row's provider column iff fallback kicked in.
+      if (providerName !== primary) {
+        await setProvider(opts.sb, id, providerName);
+      }
+      await setProviderTaskId(opts.sb, id, taskId);
+      return { generationId: id, acceptedBy: providerName };
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      lastError = e;
+      // Hard config errors (auth, malformed) → don't waste fallbacks.
+      if (isHardError(e)) break;
+      // Else continue to next provider in the chain.
+      console.warn(
+        `[commongenerator] ${providerName} submit failed; trying fallback`,
+        e.message,
+      );
+    }
   }
 
-  await setProviderTaskId(opts.sb, id, taskId);
+  // All providers in the chain failed.
+  const message = lastError?.message ?? "all providers failed without error";
+  await setFailed(opts.sb, id, message);
+  throw new Error(`Provider chain exhausted: ${message}`);
+}
 
-  return { generationId: id };
+/** Heuristic: is this error from a config / programmer mistake (don't
+ *  retry/fallback) vs a transient infrastructure issue (do retry)? */
+function isHardError(err: Error): boolean {
+  const m = err.message;
+  // 401, 403 → auth/permissions
+  if (/\b401\b|\b403\b|unauthorized|forbidden/i.test(m)) return true;
+  // Missing API key thrown by getApiKey() — config error, no point retrying
+  if (/is not set/i.test(m)) return true;
+  // Other 4xx are hard except 408 + 429 which are retryable
+  const codeMatch = m.match(/\b(4\d\d)\b/);
+  if (codeMatch) {
+    const code = parseInt(codeMatch[1]!, 10);
+    if (code === 408 || code === 429) return false;
+    if (code >= 400 && code < 500) return true;
+  }
+  return false;
 }
 
 export type GetGenerationStatusOpts = {
@@ -156,6 +198,9 @@ export async function getGenerationStatus(
       originalImageUrl: row.original_image_url,
       prompt: row.prompt,
       metadata: row.metadata,
+      // Row was processing when we started this call; we just flipped
+      // it to completed. Caller can fire one-time post-completion hooks.
+      justCompleted: true,
     };
   }
 

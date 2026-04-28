@@ -1,10 +1,19 @@
 /**
  * Image-generation provider abstraction.
  *
- * Each provider turns a (imageUrl, prompt) into a final imageUrl. They
- * differ in how the work happens — sync API, async queue with task ID,
- * background continuation, etc. — but all expose the same submit/poll
- * pair so the engine treats them uniformly.
+ * Each provider turns a (imageUrl, prompt) into a final imageUrl.
+ * They differ in the underlying model + gateway, but all expose the
+ * same submit/poll pair so the engine treats them uniformly.
+ *
+ * Naming convention: `{gateway}-{model}` so apps and ops can tell
+ * exactly what's being used. Both gateway and model are visible in
+ * the `generations.provider` column for analytics + retry-debugging.
+ *
+ * Available providers:
+ *   - wavespeed-gpt-image-2     (OpenAI gpt-image-2 via Wavespeed.ai)
+ *   - wavespeed-nano-banana-pro (Google Nano Banana Pro via Wavespeed)
+ *   - wavespeed-nano-banana-fast (faster/cheaper Nano Banana tier)
+ *   - fal-gpt-image-2           (OpenAI gpt-image-2 via Fal.ai queue)
  *
  * To add a new provider: implement ImageProvider, register it in
  * REGISTRY below, add its name to ProviderName in ../types.ts.
@@ -16,7 +25,8 @@ export type SubmitOpts = {
   imageUrl: string;
   prompt: string;
   /** Optional output size hint. Each provider normalizes to its own
-   *  preferred format (Wavespeed: "1024*1024", Fal: preset enum). */
+   *  preferred format (Wavespeed: "1024*1024" or aspect_ratio enum;
+   *  Fal: preset enum). */
   size?: string;
 };
 
@@ -33,12 +43,18 @@ export interface ImageProvider {
   pollResult(taskId: string): Promise<PollResult>;
 }
 
-import { wavespeedProvider } from "./wavespeed";
-import { openaiProvider } from "./openai-fal";
+import {
+  wavespeedGptImage2,
+  wavespeedNanoBananaPro,
+  wavespeedNanoBananaFast,
+} from "./wavespeed";
+import { falGptImage2 } from "./fal";
 
 const REGISTRY: Record<ProviderName, ImageProvider> = {
-  wavespeed: wavespeedProvider,
-  openai: openaiProvider,
+  "wavespeed-gpt-image-2": wavespeedGptImage2,
+  "wavespeed-nano-banana-pro": wavespeedNanoBananaPro,
+  "wavespeed-nano-banana-fast": wavespeedNanoBananaFast,
+  "fal-gpt-image-2": falGptImage2,
 };
 
 export function getProvider(name: ProviderName): ImageProvider {
@@ -47,7 +63,12 @@ export function getProvider(name: ProviderName): ImageProvider {
   return p;
 }
 
-export const ALL_PROVIDERS: ProviderName[] = ["wavespeed", "openai"];
+export const ALL_PROVIDERS: ProviderName[] = [
+  "wavespeed-gpt-image-2",
+  "wavespeed-nano-banana-pro",
+  "wavespeed-nano-banana-fast",
+  "fal-gpt-image-2",
+];
 
 export function isValidProvider(name: string): name is ProviderName {
   return (ALL_PROVIDERS as string[]).includes(name);

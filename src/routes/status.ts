@@ -10,6 +10,13 @@
  *   export const GET = createStatusRoute({
  *     getSupabase: () => getServerSupabase(),
  *     archive: { bucket: "results" }, // optional
+ *     postCompletion: async ({ sb, id, imageUrl, metadata }) => {
+ *       // Run after the image is delivered to the client. Fire-and-
+ *       // forget; doesn't block the response. Common uses:
+ *       // - Vision-extract data from the rendered image
+ *       // - Send delivery emails
+ *       // - Update analytics counters
+ *     },
  *   });
  *
  * The client polls this endpoint every 2-3s. Returns:
@@ -17,13 +24,27 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { after } from "next/server";
 import { getGenerationStatus } from "../generate";
+
+export type PostCompletionContext = {
+  sb: SupabaseClient;
+  id: string;
+  imageUrl: string;
+  metadata: Record<string, unknown> | null;
+};
 
 export type CreateStatusRouteOpts = {
   getSupabase: () => SupabaseClient;
   /** Optional: archive provider URLs into Supabase Storage on
    *  completion. Recommended — provider CDN URLs can expire. */
   archive?: { bucket: string };
+  /** Optional: one-time hook fired the FIRST time a row transitions
+   *  from processing → completed. Runs in next/server `after()` so it
+   *  doesn't block the client-facing response. Use for vision data
+   *  extraction, delivery emails, analytics — anything that should
+   *  happen "after the user has seen the result". */
+  postCompletion?: (ctx: PostCompletionContext) => Promise<void> | void;
 };
 
 export function createStatusRoute(opts: CreateStatusRouteOpts) {
@@ -40,6 +61,30 @@ export function createStatusRoute(opts: CreateStatusRouteOpts) {
         id,
         archive: opts.archive,
       });
+
+      // Fire post-completion hook on the FIRST transition only.
+      // The justCompleted flag is set by getGenerationStatus when this
+      // call was the one that flipped the row from processing → completed.
+      if (
+        opts.postCompletion &&
+        result.justCompleted &&
+        result.imageUrl
+      ) {
+        const hook = opts.postCompletion;
+        const imageUrl = result.imageUrl;
+        const metadata = result.metadata;
+        after(async () => {
+          try {
+            await hook({ sb, id, imageUrl, metadata });
+          } catch (err) {
+            console.error(
+              `[commongenerator] postCompletion hook failed for ${id}`,
+              err,
+            );
+          }
+        });
+      }
+
       return new Response(
         JSON.stringify({
           status: result.status,
@@ -53,7 +98,6 @@ export function createStatusRoute(opts: CreateStatusRouteOpts) {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // 404 if the generation doesn't exist; 500 otherwise
       const status = /not found/i.test(message) ? 404 : 500;
       return new Response(JSON.stringify({ error: message }), {
         status,

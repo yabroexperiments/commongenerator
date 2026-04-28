@@ -62,7 +62,7 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
       return jsonResponse({ error: message }, 400);
     }
 
-    const provider = input.provider ?? opts.defaultProvider ?? "wavespeed";
+    const provider = input.provider ?? opts.defaultProvider ?? "wavespeed-gpt-image-2";
     if (!isValidProvider(provider)) {
       return jsonResponse({ error: `Unknown provider: ${provider}` }, 400);
     }
