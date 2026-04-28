@@ -1,0 +1,49 @@
+{
+  "name": "commongenerator",
+  "version": "0.1.0",
+  "description": "Shared image-generation engine for the 狗仔 product family.",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./routes": {
+      "types": "./dist/routes/index.d.ts",
+      "default": "./dist/routes/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "default": "./dist/react/index.js"
+    },
+    "./sql/*": "./sql/*"
+  },
+  "files": [
+    "dist",
+    "sql"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "next": "^15 || ^16",
+    "react": "^18 || ^19"
+  },
+  "peerDependenciesMeta": {
+    "next": { "optional": true },
+    "react": { "optional": true }
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "next": "^16.2.4",
+    "react": "^19.2.4",
+    "typescript": "^5"
+  }
+}

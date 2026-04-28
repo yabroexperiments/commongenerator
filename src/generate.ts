@@ -1,0 +1,208 @@
+/**
+ * The two main engine functions:
+ *   - startGeneration: insert a row, submit to provider, return the row ID
+ *   - getGenerationStatus: read the row; if still processing, poll the
+ *     provider once and update the row; return the latest state
+ *
+ * Long-running image edits don't fit in a single Vercel function call
+ * (Hobby is 60s, generations take 30-180s). So we split: start returns
+ * fast with an ID; the client polls the status endpoint every 2-3s.
+ *
+ * Both functions take a SupabaseClient — credentials are 100% per-app.
+ */
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  getGeneration,
+  insertGeneration,
+  setCompleted,
+  setFailed,
+  setProviderTaskId,
+} from "./db";
+import { getProvider } from "./providers";
+import type {
+  GenerationStatusResponse,
+  StartGenerationInput,
+} from "./types";
+
+export type StartGenerationOpts = StartGenerationInput & {
+  sb: SupabaseClient;
+  /** Pre-generated generation ID — if omitted, a UUID is created here.
+   *  Useful when the app wants to know the ID before insert (e.g. to
+   *  return it from /api/generate before awaiting Supabase). */
+  id?: string;
+};
+
+export type StartGenerationResult = {
+  generationId: string;
+};
+
+export async function startGeneration(
+  opts: StartGenerationOpts,
+): Promise<StartGenerationResult> {
+  const providerName = opts.provider ?? "wavespeed";
+  const provider = getProvider(providerName);
+  const id = opts.id ?? crypto.randomUUID();
+
+  // 1. Persist the row (status=processing) so we have a stable ID
+  await insertGeneration(opts.sb, {
+    id,
+    kind: opts.kind,
+    original_image_url: opts.imageUrl,
+    prompt: opts.prompt,
+    provider: providerName,
+    metadata: opts.metadata,
+  });
+
+  // 2. Submit to provider — capture failures so the row reflects them
+  let taskId: string;
+  try {
+    const result = await provider.submit({
+      imageUrl: opts.imageUrl,
+      prompt: opts.prompt,
+      size: opts.size,
+    });
+    taskId = result.taskId;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await setFailed(opts.sb, id, message);
+    throw new Error(`Provider submit failed: ${message}`);
+  }
+
+  await setProviderTaskId(opts.sb, id, taskId);
+
+  return { generationId: id };
+}
+
+export type GetGenerationStatusOpts = {
+  sb: SupabaseClient;
+  id: string;
+  /** Optional: archive the upstream image to Supabase Storage on
+   *  completion. Provider URLs (e.g. Wavespeed CDN) may expire; pass
+   *  a bucket name and the engine will copy + return a Storage URL.
+   *  If omitted, the upstream URL is returned as-is. */
+  archive?: { bucket: string };
+};
+
+export async function getGenerationStatus(
+  opts: GetGenerationStatusOpts,
+): Promise<GenerationStatusResponse> {
+  const row = await getGeneration(opts.sb, opts.id);
+  if (!row) {
+    throw new Error(`Generation not found: ${opts.id}`);
+  }
+
+  // Already terminal — just return what's persisted
+  if (row.status === "completed" || row.status === "failed") {
+    return {
+      status: row.status,
+      imageUrl: row.result_image_url,
+      error: row.error_message,
+      originalImageUrl: row.original_image_url,
+      prompt: row.prompt,
+      metadata: row.metadata,
+    };
+  }
+
+  // No task ID yet — submit must still be in flight
+  if (!row.provider_task_id) {
+    return {
+      status: "processing",
+      imageUrl: null,
+      error: null,
+      originalImageUrl: row.original_image_url,
+      prompt: row.prompt,
+      metadata: row.metadata,
+    };
+  }
+
+  // Poll the provider once
+  const provider = getProvider(row.provider);
+  let pollResult;
+  try {
+    pollResult = await provider.pollResult(row.provider_task_id);
+  } catch (err) {
+    // Transient — let the next poll try again
+    console.error(`[commongenerator] ${row.provider} poll failed`, err);
+    return {
+      status: "processing",
+      imageUrl: null,
+      error: null,
+      originalImageUrl: row.original_image_url,
+      prompt: row.prompt,
+      metadata: row.metadata,
+    };
+  }
+
+  if (pollResult.status === "completed") {
+    let imageUrl = pollResult.imageUrl;
+
+    // Optionally archive to Supabase Storage so we own the asset
+    if (opts.archive) {
+      const archived = await archiveToStorage(
+        opts.sb,
+        opts.archive.bucket,
+        `${opts.id}.png`,
+        pollResult.imageUrl,
+      );
+      if (archived) imageUrl = archived;
+    }
+
+    await setCompleted(opts.sb, opts.id, imageUrl);
+    return {
+      status: "completed",
+      imageUrl,
+      error: null,
+      originalImageUrl: row.original_image_url,
+      prompt: row.prompt,
+      metadata: row.metadata,
+    };
+  }
+
+  if (pollResult.status === "failed") {
+    await setFailed(opts.sb, opts.id, pollResult.error);
+    return {
+      status: "failed",
+      imageUrl: null,
+      error: pollResult.error,
+      originalImageUrl: row.original_image_url,
+      prompt: row.prompt,
+      metadata: row.metadata,
+    };
+  }
+
+  return {
+    status: "processing",
+    imageUrl: null,
+    error: null,
+    originalImageUrl: row.original_image_url,
+    prompt: row.prompt,
+    metadata: row.metadata,
+  };
+}
+
+/** Copy a remote image URL to Supabase Storage. Returns the public URL,
+ *  or null if archiving fails (caller falls back to the upstream URL). */
+async function archiveToStorage(
+  sb: SupabaseClient,
+  bucket: string,
+  path: string,
+  upstreamUrl: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(upstreamUrl);
+    if (!res.ok) throw new Error(`fetch ${res.status}`);
+    const buffer = await res.arrayBuffer();
+    const { error } = await sb.storage.from(bucket).upload(path, buffer, {
+      contentType: "image/png",
+      upsert: true,
+      cacheControl: "31536000",
+    });
+    if (error) throw error;
+    const { data } = sb.storage.from(bucket).getPublicUrl(path);
+    return data.publicUrl;
+  } catch (err) {
+    console.error("[commongenerator] archive to storage failed", err);
+    return null;
+  }
+}
