@@ -14,6 +14,9 @@
 export { analyzeImage } from "./analyze";
 export type { AnalyzeImageOpts } from "./analyze";
 
+export { renderPrompt } from "./render-prompt";
+export type { PromptVars, RenderPromptOpts } from "./render-prompt";
+
 export { startGeneration, getGenerationStatus } from "./generate";
 export type {
   StartGenerationOpts,
