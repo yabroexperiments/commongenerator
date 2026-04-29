@@ -24,11 +24,18 @@ export {
 } from "./model-families";
 export type { ModelFamily } from "./model-families";
 
-export { startGeneration, getGenerationStatus } from "./generate";
+export {
+  startGeneration,
+  getGenerationStatus,
+  insertGenerationRow,
+  submitGenerationToProvider,
+} from "./generate";
 export type {
   StartGenerationOpts,
   StartGenerationResult,
   GetGenerationStatusOpts,
+  InsertGenerationRowOpts,
+  SubmitGenerationToProviderOpts,
 } from "./generate";
 
 export {

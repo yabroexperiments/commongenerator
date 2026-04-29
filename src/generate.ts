@@ -10,6 +10,15 @@
  * fast with an ID; the client polls the status endpoint every 2-3s.
  *
  * Both functions take a SupabaseClient — credentials are 100% per-app.
+ *
+ * Two extra exports for advanced flow control:
+ *   - insertGenerationRow: just the DB insert. Fast, <100ms.
+ *   - submitGenerationToProvider: walks the fallback chain.
+ *     Slow (provider POSTs typically 5-15s).
+ *
+ * These exist so `createGenerateRoute` can defer the slow submit to
+ * Next.js `after()` while still returning the generation ID
+ * immediately — see deferSubmit option there.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -44,15 +53,21 @@ export type StartGenerationResult = {
   acceptedBy: ProviderName;
 };
 
-export async function startGeneration(
-  opts: StartGenerationOpts,
-): Promise<StartGenerationResult> {
+/* ─────────── Granular building blocks (advanced) ─────────── */
+
+export type InsertGenerationRowOpts = StartGenerationInput & {
+  sb: SupabaseClient;
+  id?: string;
+};
+
+/** Insert the tracking row only — no provider call. Returns the row ID.
+ *  Use when you want to return a generationId fast and run the slow
+ *  provider.submit() asynchronously (e.g. inside Next.js `after()`). */
+export async function insertGenerationRow(
+  opts: InsertGenerationRowOpts,
+): Promise<string> {
   const id = opts.id ?? crypto.randomUUID();
   const primary = opts.provider ?? "wavespeed-gpt-image-2";
-  const chain: ProviderName[] = [primary, ...(opts.fallbackProviders ?? [])];
-
-  // 1. Persist row with the PRIMARY provider initially. If a fallback
-  //    ends up handling it, we update the column further down.
   await insertGeneration(opts.sb, {
     id,
     kind: opts.kind,
@@ -61,8 +76,24 @@ export async function startGeneration(
     provider: primary,
     metadata: opts.metadata,
   });
+  return id;
+}
 
-  // 2. Walk the chain until one provider accepts (or all fail).
+export type SubmitGenerationToProviderOpts = StartGenerationInput & {
+  sb: SupabaseClient;
+  id: string;
+};
+
+/** Walk the provider fallback chain on an EXISTING row. Updates the row
+ *  with the provider task ID on success, or marks status=failed on
+ *  total chain exhaustion. Designed to be called from inside `after()`
+ *  by the route factory's deferSubmit path. */
+export async function submitGenerationToProvider(
+  opts: SubmitGenerationToProviderOpts,
+): Promise<StartGenerationResult> {
+  const primary = opts.provider ?? "wavespeed-gpt-image-2";
+  const chain: ProviderName[] = [primary, ...(opts.fallbackProviders ?? [])];
+
   let lastError: Error | undefined;
   for (let i = 0; i < chain.length; i++) {
     const providerName = chain[i]!;
@@ -73,18 +104,15 @@ export async function startGeneration(
         prompt: opts.prompt,
         size: opts.size,
       });
-      // Update the row's provider column iff fallback kicked in.
       if (providerName !== primary) {
-        await setProvider(opts.sb, id, providerName);
+        await setProvider(opts.sb, opts.id, providerName);
       }
-      await setProviderTaskId(opts.sb, id, taskId);
-      return { generationId: id, acceptedBy: providerName };
+      await setProviderTaskId(opts.sb, opts.id, taskId);
+      return { generationId: opts.id, acceptedBy: providerName };
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       lastError = e;
-      // Hard config errors (auth, malformed) → don't waste fallbacks.
       if (isHardError(e)) break;
-      // Else continue to next provider in the chain.
       console.warn(
         `[commongenerator] ${providerName} submit failed; trying fallback`,
         e.message,
@@ -92,11 +120,21 @@ export async function startGeneration(
     }
   }
 
-  // All providers in the chain failed.
   const message = lastError?.message ?? "all providers failed without error";
-  await setFailed(opts.sb, id, message);
+  await setFailed(opts.sb, opts.id, message);
   throw new Error(`Provider chain exhausted: ${message}`);
 }
+
+/* ─────────── High-level convenience ─────────── */
+
+export async function startGeneration(
+  opts: StartGenerationOpts,
+): Promise<StartGenerationResult> {
+  const id = await insertGenerationRow(opts);
+  return await submitGenerationToProvider({ ...opts, id });
+}
+
+/* ─────────── Helpers ─────────── */
 
 /** Heuristic: is this error from a config / programmer mistake (don't
  *  retry/fallback) vs a transient infrastructure issue (do retry)? */
