@@ -67,34 +67,47 @@ commongenerator/
 ├── README.md                 # TL;DR
 ├── INTEGRATION_GUIDE.md      # this file
 ├── sql/
-│   └── 0001_generations.sql  # apply once per consuming Supabase project
+│   ├── 0001_generations.sql      # apply once per consuming Supabase project
+│   └── 0002_rename_providers.sql # for legacy apps with the pre-rename catalog
 └── src/
     ├── index.ts              # public exports for `commongenerator`
     ├── types.ts              # ProviderName, GenerationRow, etc.
     ├── analyze.ts            # analyzeImage (with retry)
-    ├── generate.ts           # startGeneration + getGenerationStatus
+    ├── generate.ts           # startGeneration + getGenerationStatus (with fallback chain)
     ├── render-prompt.ts      # renderPrompt utility
     ├── cloudinary.ts         # applyCloudinaryTransform helpers
+    ├── model-families.ts     # getModelFamily / providersInFamily
     ├── db.ts                 # internal Supabase generations-table CRUD
     ├── providers/
     │   ├── index.ts          # ImageProvider interface + registry
-    │   ├── wavespeed.ts      # Wavespeed (Google Nano Banana Pro)
-    │   └── openai-fal.ts     # OpenAI gpt-image-2 via Fal.ai queue
+    │   ├── wavespeed.ts      # 3 Wavespeed-routed providers (gpt-image-2, nano-banana pro/fast)
+    │   └── fal.ts            # fal-gpt-image-2 (OpenAI via Fal.ai queue)
+    ├── auth/
+    │   ├── index.ts          # public exports for `commongenerator/auth`
+    │   ├── middleware-factory.ts   # createAdminMiddleware
+    │   └── login-route-factory.ts  # createAdminLoginRoute / Logout
     ├── routes/
     │   ├── index.ts          # public exports for `commongenerator/routes`
     │   ├── generate.ts       # createGenerateRoute factory
-    │   └── status.ts         # createStatusRoute factory
+    │   └── status.ts         # createStatusRoute factory (with postCompletion hook)
     └── react/
-        ├── index.ts          # public exports for `commongenerator/react`
-        └── use-generation-status.ts   # polling hook
+        ├── index.ts                  # public exports for `commongenerator/react`
+        ├── use-generation-status.ts  # polling hook
+        ├── multi-provider-runner.tsx # admin testbench primitive
+        └── admin-login-form.tsx      # drop-in login form
 ```
 
 ### Subpath imports
 
 ```ts
-import { startGeneration, analyzeImage } from "commongenerator";
+import { startGeneration, analyzeImage, getModelFamily } from "commongenerator";
 import { createGenerateRoute, createStatusRoute } from "commongenerator/routes";
-import { useGenerationStatus } from "commongenerator/react";
+import { createAdminMiddleware, createAdminLoginRoute } from "commongenerator/auth";
+import {
+  useGenerationStatus,
+  MultiProviderRunner,
+  AdminLoginForm,
+} from "commongenerator/react";
 ```
 
 ---
@@ -275,6 +288,76 @@ Maps a provider name to its model family:
 - `wavespeed-gpt-image-2`, `fal-gpt-image-2` → `"gpt-image-2"`
 - `wavespeed-nano-banana-pro`, `wavespeed-nano-banana-fast` → `"nano-banana"`
 
+### `createAdminMiddleware(config?) → Next middleware`
+
+Single-secret admin auth. Reads `ADMIN_SECRET` env var, gates routes
+by checking a cookie whose value equals the secret.
+
+```ts
+// src/middleware.ts in the consuming app
+import { createAdminMiddleware } from "commongenerator/auth";
+
+export const middleware = createAdminMiddleware({
+  cookieName: "myapp_admin",  // unique-per-app to avoid *.vercel.app collisions
+});
+
+export const config = {
+  matcher: ["/admin/:path*", "/api/admin/:path*"],
+};
+```
+
+| Option | Default | Notes |
+|---|---|---|
+| `envVar` | `"ADMIN_SECRET"` | Env var holding the secret |
+| `cookieName` | `"admin_session"` | Pick a unique value per app |
+| `loginPath` | `"/admin/login"` | Where to redirect unauth'd page requests |
+| `allowPaths` | `[]` | Extra always-allowed paths beyond loginPath, /api/admin/login, /api/admin/logout |
+
+Without the env var set, middleware returns 503 (refuses to run
+unsafely). Pages get redirected to login with `?from=`. APIs get 401.
+
+### `createAdminLoginRoute(config?)` / `createAdminLogoutRoute(config?)`
+
+Companion route factories for the login form's POST endpoint.
+
+```ts
+// src/app/api/admin/login/route.ts
+import {
+  createAdminLoginRoute,
+  createAdminLogoutRoute,
+} from "commongenerator/auth";
+
+export const runtime = "nodejs";
+export const POST = createAdminLoginRoute({ cookieName: "myapp_admin" });
+export const DELETE = createAdminLogoutRoute({ cookieName: "myapp_admin" });
+```
+
+POST validates `{ secret }` JSON body against the env var, sets the
+cookie on success (httpOnly, SameSite=Lax, Secure in prod, 30-day
+default). DELETE clears it.
+
+### `<AdminLoginForm />`
+
+Drop-in client login form. Mounts on the login page, POSTs to the
+login endpoint, redirects to `?from=` query param on success.
+
+```tsx
+// src/app/admin/login/page.tsx
+import { AdminLoginForm } from "commongenerator/react";
+
+export const metadata = { robots: { index: false, follow: false } };
+
+export default function AdminLoginPage() {
+  return <AdminLoginForm title="🐶 MyApp admin" redirectTo="/admin/test" />;
+}
+```
+
+| Prop | Default | Notes |
+|---|---|---|
+| `redirectTo` | `"/admin"` | Fallback if no `?from=` query param |
+| `endpoint` | `"/api/admin/login"` | POST target |
+| `title` | `"Admin Login"` | Header text |
+
 ### `useGenerationStatus(id, opts?) → React state`
 
 Client hook. Polls `/api/status/[id]` until terminal. Stops itself
@@ -443,7 +526,38 @@ its local `resolveProvider` consults).
 7. **Upload UI** — handle the photo upload separately. Direct upload
    from the browser to Supabase Storage (signed URL) or Cloudinary
    (signed upload preset). The engine doesn't do uploads — it
-   accepts whatever public URL you already have.
+   accepts whatever public URL you already have. **Add the
+   `compressImage` utility from §8** before uploading — saves
+   10-30s end-to-end on most generations.
+
+8. **Wire admin auth** — three small files (see §7 for details):
+
+   ```ts
+   // src/middleware.ts
+   import { createAdminMiddleware } from "commongenerator/auth";
+   export const middleware = createAdminMiddleware({ cookieName: "myapp_admin" });
+   export const config = { matcher: ["/admin/:path*", "/api/admin/:path*"] };
+   ```
+
+   ```tsx
+   // src/app/admin/login/page.tsx
+   import { AdminLoginForm } from "commongenerator/react";
+   export default function Page() {
+     return <AdminLoginForm title="MyApp admin" redirectTo="/admin/test" />;
+   }
+   ```
+
+   ```ts
+   // src/app/api/admin/login/route.ts
+   import { createAdminLoginRoute, createAdminLogoutRoute } from "commongenerator/auth";
+   export const runtime = "nodejs";
+   export const POST = createAdminLoginRoute({ cookieName: "myapp_admin" });
+   export const DELETE = createAdminLogoutRoute({ cookieName: "myapp_admin" });
+   ```
+
+   Set `ADMIN_SECRET` in Vercel (Production + Preview — see §10
+   for the Development-scope gotcha). Without it, middleware
+   returns 503.
 
 ---
 
@@ -500,7 +614,182 @@ the orchestration (parallel submit, batch polling, post-processing).
 
 ---
 
-## 7. Database schema
+## 7. Admin testbench pattern
+
+Every project that ships AI-generated content needs prompt iteration
+infrastructure: change a prompt → see how it renders → save the
+winning version. Building this from scratch per project would be
+~500 lines × N projects. The engine ships the reusable pieces
+(provider runner + auth + login form), each app provides ~250 lines
+of project-specific glue (prompt schema, form fields, save endpoint).
+
+**Reference implementations:**
+- `gogo-gallery/src/app/admin/test/page.tsx` (style + subject schema)
+- `dograting/src/app/admin/test/page.tsx` (rating-card schema with
+  test-variable fields like dog_name, age, breed)
+
+### The pieces
+
+```
+src/middleware.ts                         ← createAdminMiddleware (gates routes)
+src/app/admin/login/page.tsx              ← <AdminLoginForm />
+src/app/api/admin/login/route.ts          ← createAdminLoginRoute + Logout
+src/app/admin/test/page.tsx               ← project-specific UI + <MultiProviderRunner />
+src/app/api/admin/get-prompt/route.ts     ← project-specific GET handler
+src/app/api/admin/save-prompt/route.ts    ← project-specific POST handler
+src/app/api/admin/settings/route.ts       ← optional: default-provider knob
+```
+
+### Per-family prompt schema (recommended)
+
+Store one prompt per **model family**, not per specific provider —
+`wavespeed-gpt-image-2` and `fal-gpt-image-2` route to the same
+underlying model so the same prompt works for both. Use
+`getModelFamily(provider)` to bucket.
+
+Schema for the project's `prompts` table:
+
+```sql
+create table public.prompts (
+  id uuid primary key default gen_random_uuid(),
+  kind text not null,           -- e.g. "rating-card", "stickers-wave", "outfit-overlay"
+  prompt_text text not null,    -- nano-banana family (default for all non-gpt-image-2 providers)
+  gpt_image_2_prompt_text text, -- gpt-image-2 fork; falls back to prompt_text if NULL
+  description text,             -- human-readable note for admins
+  version int default 1,
+  updated_at timestamptz default now(),
+  unique(kind)
+);
+
+create table public.settings (
+  key text primary key,
+  value text not null,
+  updated_at timestamptz default now()
+);
+
+insert into public.settings (key, value) values
+  ('default_provider', 'wavespeed-nano-banana-fast');
+```
+
+### Server-side prompt resolution
+
+```ts
+// src/lib/prompts.ts
+import { type ModelFamily } from "commongenerator";
+import { getServerSupabase } from "./supabase";
+
+export async function fetchPromptTemplate(
+  kind: string,
+  family: ModelFamily,
+): Promise<string> {
+  const sb = getServerSupabase();
+  const { data, error } = await sb
+    .from("prompts")
+    .select("prompt_text, gpt_image_2_prompt_text")
+    .eq("kind", kind)
+    .single();
+  if (error || !data) throw new Error(`Prompt "${kind}" not found`);
+  return family === "gpt-image-2" && data.gpt_image_2_prompt_text?.trim()
+    ? data.gpt_image_2_prompt_text
+    : data.prompt_text;
+}
+```
+
+Then in `/api/generate`:
+
+```ts
+const family = getModelFamily(provider);
+const template = await fetchPromptTemplate("rating-card", family);
+const prompt = renderPrompt(template, { dog_name, age, breed, ... });
+```
+
+### Recipe: spinning up the testbench for a new project
+
+1. Apply the SQL migration to your project's Supabase (prompts table
+   schema above, plus settings table).
+2. Seed your prompts table with a row for each `kind` you support.
+3. Add `src/middleware.ts` (3 lines, picks a unique cookieName).
+4. Add `src/app/admin/login/page.tsx` (3 lines, mounts `<AdminLoginForm />`).
+5. Add `src/app/api/admin/login/route.ts` (3 lines, factory wrappers).
+6. Write the project-specific admin/test page using `<MultiProviderRunner />`
+   — copy DogRating's as a starting point, swap the prompt-form section for
+   your project's schema (whatever variables your prompts have).
+7. Wire `/api/admin/get-prompt` and `/api/admin/save-prompt` against
+   your project's prompts table. Both are project-specific because the
+   schema varies — usually 30-50 lines each.
+8. Optional: `/api/admin/settings` for the default-provider dropdown
+   (reuses the generic ALL_PROVIDERS validation).
+9. Set `ADMIN_SECRET` in Vercel for all 3 scopes; deploy.
+
+Total per project: ~300-400 lines, mostly the admin/test page UI.
+
+---
+
+## 8. Image compression utility
+
+Phones produce 4-12 MB photos. Sending those raw inflates upload
+time, the AI provider's image-fetch step (OpenAI's 30s timeout
+triggers on slow fetches), and the model's inference cost
+(gpt-image-2 is sensitive to input size). Resizing to 1024px / JPEG
+q=70 cuts payload to <500 KB and shaves 10-30s off end-to-end
+generation time.
+
+**Pattern (NOT in the engine — copy this util into each project):**
+
+```ts
+// src/lib/compress-image.ts
+export async function compressImage(
+  file: File | Blob,
+  opts: { maxDimension?: number; quality?: number } = {},
+): Promise<Blob> {
+  const maxDim = opts.maxDimension ?? 1024;
+  const quality = opts.quality ?? 0.7;
+
+  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const longest = Math.max(bitmap.width, bitmap.height);
+  const scale = longest > maxDim ? maxDim / longest : 1;
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas 2D context unavailable");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("toBlob null"))),
+      "image/jpeg",
+      quality,
+    );
+  });
+}
+```
+
+Wire it BEFORE the upload to Storage:
+
+```tsx
+const compressed = await compressImage(file);
+await sb.storage.from("uploads").upload(path, compressed, {
+  contentType: "image/jpeg",
+});
+```
+
+Why not in the engine: it's pure browser code (uses
+`createImageBitmap`, `<canvas>`, `document.createElement`) and
+projects often want to tune defaults (max dim, quality, output format)
+per their use case. Promote to engine if a 3rd or 4th project needs
+the exact same shape.
+
+`imageOrientation: "from-image"` is required so EXIF rotation is
+applied — without it, mobile portrait photos come out sideways.
+
+---
+
+## 9. Database schema
 
 The `sql/0001_generations.sql` migration creates one table:
 
@@ -528,7 +817,7 @@ policy.
 
 ---
 
-## 8. Required environment variables
+## 10. Required environment variables
 
 Per consuming app (each app has its own values):
 
@@ -538,18 +827,37 @@ Per consuming app (each app has its own values):
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | always | For client-side uploads to Storage |
 | `SUPABASE_SERVICE_ROLE_KEY` | always | Server-only, used by the engine |
 | `OPENAI_API_KEY` | when using `analyzeImage` | gpt-4o-mini calls |
-| `WAVESPEED_API_KEY` | when using `wavespeed` provider | |
-| `FAL_API_KEY` | when using `openai` provider (via Fal) | |
+| `WAVESPEED_API_KEY` | when using a `wavespeed-*` provider | covers all 3 wavespeed model variants |
+| `FAL_API_KEY` | when using `fal-gpt-image-2` provider | |
 | `CLOUDINARY_CLOUD_NAME` | when calling `applyCloudinaryTransform` | |
+| `ADMIN_SECRET` | when admin auth middleware is wired | required for `/admin/*` access; without it, middleware returns 503 (refuses to operate unsafely). Generate with `openssl rand -base64 32`. |
 
 Per the project-separation rule: **never share keys across projects.**
 Each app gets its own Supabase project, OpenAI key, Wavespeed key,
 Cloudinary cloud, etc. Spend caps and abuse blast radius are then
 per-project.
 
+### Vercel "Sensitive" env var gotcha
+
+Vercel auto-flags variables containing "SECRET", "KEY", "TOKEN" etc.
+as Sensitive. Sensitive vars **cannot be set in the Development
+scope** via the dashboard — only Production and Preview. Two
+workarounds:
+
+1. **(Recommended)** Set `ADMIN_SECRET` only in Production + Preview
+   on Vercel. For local development, generate a separate value and
+   put it directly in your local `.env.local`. The local value only
+   guards local dev (already private to your machine), so it can be
+   anything — `admin123` is fine for local. Production gets the
+   strong random value.
+
+2. Uncheck the "Sensitive" toggle when adding the variable in Vercel.
+   The value becomes readable in the dashboard going forward — fine
+   for a value used by only one or two people, less ideal otherwise.
+
 ---
 
-## 9. Versioning + updates
+## 11. Versioning + updates
 
 - The package is private and not on npm. Apps install from GitHub:
   `"commongenerator": "github:yabroexperiments/commongenerator#main"`
@@ -576,7 +884,7 @@ npm install github:yabroexperiments/commongenerator#v0.2.0
 
 ---
 
-## 10. Known limitations / future work
+## 12. Known limitations / future work
 
 - **No direct upload helper.** Apps handle uploads via direct
   Supabase Storage signed URLs or Cloudinary unsigned preset. The
@@ -600,7 +908,7 @@ npm install github:yabroexperiments/commongenerator#v0.2.0
 
 ---
 
-## 11. Quick reference: "I want to build a new project that does X"
+## 13. Quick reference: "I want to build a new project that does X"
 
 0. **Pick an ASCII-only path for the project folder.** Next.js 16's
    Turbopack production build crashes when the working directory
@@ -613,20 +921,37 @@ npm install github:yabroexperiments/commongenerator#v0.2.0
    ASCII-only paths.** Good: `~/Projects/PetBusiness/DogRating/`.
    Bad: `~/Projects/PetBusiness/狗狗畫廊/dog-rating/`.
 
-1. Create a new Next.js 16 app (use gogo-gallery as the template
-   — same stack, same patterns)
+1. Create a new Next.js 16 app (use gogo-gallery or DogRating as
+   the template — same stack, same patterns)
 2. Create a new Supabase project (separate from sibling apps —
-   project-separation rule)
-3. Apply `sql/0001_generations.sql` to it
-4. Create a `prompts` table for your project's prompt templates
-   (see gogo-gallery's `prompts` table as a reference)
-5. Install `commongenerator` from GitHub
-6. Wire `/api/generate` and `/api/status/[id]` via the route
-   factories (section 5)
-7. Build the upload form + result page using the React hook
-8. Iterate on prompts in your project's Supabase prompts table —
-   no engine changes needed for prompt tweaks
+   project-separation rule). DogRating + gogo-gallery + every new
+   app has its own.
+3. Apply `sql/0001_generations.sql` to it. Add a `prompts` table
+   with the per-family fork schema from §7.
+4. Install `commongenerator` from GitHub:
+   `npm install github:yabroexperiments/commongenerator#main`
+5. Wire `/api/generate` and `/api/status/[id]` via the route
+   factories (§5 step 5)
+6. Wire admin auth: middleware + login page + login route (§5 step 8).
+   Set `ADMIN_SECRET` in Vercel.
+7. Build the user-facing upload form + result page using the React
+   hook. Add `compressImage` (§8) before the Storage upload.
+8. Build the `/admin/test` prompt playground (§7 recipe). Compares
+   3 providers side-by-side via `<MultiProviderRunner />`, saves
+   per family.
+9. Seed your prompts table with one row per `kind` you support.
+   Iterate from `/admin/test` — no engine changes needed for prompt
+   tweaks.
 
 For workflows beyond single-image (rating cards, sticker packs,
 outfit suggestions, etc.) see section 6 patterns and orchestrate
 multiple `startGeneration` calls from your app.
+
+### Cookie name conflicts on *.vercel.app
+
+When multiple sibling apps deploy to the same `*.vercel.app` parent
+domain, browsers may share cookies across them depending on Domain
+settings. To avoid one app's admin session leaking into another's
+auth check, **pick a unique `cookieName` per project**:
+`gogo_gallery_admin`, `dograting_admin`, `linestickers_admin`, etc.
+The middleware factory makes this a one-line config option.
