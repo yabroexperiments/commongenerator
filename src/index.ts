@@ -17,6 +17,13 @@ export type { AnalyzeImageOpts } from "./analyze";
 export { renderPrompt } from "./render-prompt";
 export type { PromptVars, RenderPromptOpts } from "./render-prompt";
 
+export {
+  getModelFamily,
+  providersInFamily,
+  PROVIDER_FAMILY,
+} from "./model-families";
+export type { ModelFamily } from "./model-families";
+
 export { startGeneration, getGenerationStatus } from "./generate";
 export type {
   StartGenerationOpts,

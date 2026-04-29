@@ -228,6 +228,53 @@ Helpers:
 - `buildWatermarkTransform({ text, fontSize?, color?, opacity?, gravity?, padding? })` →  returns the transform string
 - `BG_REMOVAL_TRANSFORM` constant (`"e_background_removal"`)
 
+### `<MultiProviderRunner />` (admin testbench primitive)
+
+Side-by-side comparison runner for prompt iteration. Submits the same
+generation to N providers in parallel, shows result panels with
+elapsed timers, optional "Save prompt" buttons.
+
+```tsx
+import { MultiProviderRunner } from "commongenerator/react";
+import { getModelFamily } from "commongenerator";
+
+<MultiProviderRunner
+  providers={[
+    "wavespeed-gpt-image-2",
+    "wavespeed-nano-banana-pro",
+    "fal-gpt-image-2",
+  ]}
+  buildBody={(provider) => ({
+    upload_url: imageUrl,
+    style: selectedStyle,
+    provider,
+    prompt_override: promptForFamily(getModelFamily(provider)),
+  })}
+  onSave={async (provider) => {
+    const family = getModelFamily(provider);
+    await fetch("/api/admin/save-prompt", {
+      method: "POST",
+      body: JSON.stringify({
+        style: selectedStyle,
+        family,
+        prompt_text: promptForFamily(family),
+      }),
+    });
+  }}
+/>
+```
+
+**Recommended pattern:** save prompts per **model family**
+(`gpt-image-2`, `nano-banana`) rather than per specific provider —
+same model behaves the same regardless of gateway. Use
+`getModelFamily(provider)` to bucket.
+
+### `getModelFamily(provider) → ModelFamily`
+
+Maps a provider name to its model family:
+- `wavespeed-gpt-image-2`, `fal-gpt-image-2` → `"gpt-image-2"`
+- `wavespeed-nano-banana-pro`, `wavespeed-nano-banana-fast` → `"nano-banana"`
+
 ### `useGenerationStatus(id, opts?) → React state`
 
 Client hook. Polls `/api/status/[id]` until terminal. Stops itself
