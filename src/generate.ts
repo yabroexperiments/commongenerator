@@ -103,6 +103,7 @@ export async function submitGenerationToProvider(
         imageUrl: opts.imageUrl,
         prompt: opts.prompt,
         size: opts.size,
+        quality: opts.quality,
       });
       if (providerName !== primary) {
         await setProvider(opts.sb, opts.id, providerName);

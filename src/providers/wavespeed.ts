@@ -80,7 +80,9 @@ function buildNanoBananaBody(opts: SubmitOpts): Record<string, unknown> {
     images: [opts.imageUrl],
     prompt: opts.prompt,
     size: opts.size ?? "1024*1024",
-    quality: "high",
+    // Nano Banana variants are already "fast/pro" tiers by name —
+    // default to high quality, override only if explicitly requested.
+    quality: opts.quality ?? "high",
   };
 }
 
@@ -104,7 +106,10 @@ function buildGptImage2Body(opts: SubmitOpts): Record<string, unknown> {
     prompt: opts.prompt,
     aspect_ratio,
     resolution,
-    quality: "high",
+    // gpt-image-2 quality tier has a big speed/cost impact.
+    // Default "medium" (was "high") — high is 40-90s and most apps
+    // don't need that fidelity for the free-tier preview.
+    quality: opts.quality ?? "medium",
   };
 }
 

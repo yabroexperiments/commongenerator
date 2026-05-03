@@ -48,6 +48,8 @@ export type StartGenerationInput = {
   fallbackProviders?: ProviderName[];
   /** "1024*1024" / "1024x1024" — providers normalize internally. */
   size?: string;
+  /** Quality tier. See SubmitOpts.quality for per-provider defaults. */
+  quality?: "low" | "medium" | "high";
   /** Free-form tag for the generation. App-specific. */
   kind?: string;
   /** Free-form jsonb the app wants stored alongside the row. */

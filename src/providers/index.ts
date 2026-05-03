@@ -28,6 +28,14 @@ export type SubmitOpts = {
    *  preferred format (Wavespeed: "1024*1024" or aspect_ratio enum;
    *  Fal: preset enum). */
   size?: string;
+  /** Quality tier. Big speed/cost lever — gpt-image-2 reports
+   *  ~5-10s @ low, 15-30s @ medium, 40-90s @ high. Defaults differ
+   *  per provider:
+   *    - gpt-image-2 (Wavespeed + Fal): "medium" (was "high" pre-2026-04)
+   *    - nano-banana variants: "high" (already a fast tier by name)
+   *  Admin/test pages should expose this so the operator can pick the
+   *  speed/fidelity tradeoff that fits the product. */
+  quality?: "low" | "medium" | "high";
 };
 
 export type PollResult =

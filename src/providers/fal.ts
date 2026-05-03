@@ -118,7 +118,9 @@ export const falGptImage2: ImageProvider = {
       prompt: opts.prompt,
       image_urls: [opts.imageUrl],
       image_size: mapSizeToFal(opts.size),
-      quality: "high",
+      // gpt-image-2 default — see Wavespeed comment. "medium" is the
+      // sweet spot for speed/fidelity; admins can override per request.
+      quality: opts.quality ?? "medium",
       num_images: 1,
       output_format: "png",
     }),

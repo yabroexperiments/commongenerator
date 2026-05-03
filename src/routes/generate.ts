@@ -101,6 +101,7 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
       provider,
       fallbackProviders: input.fallbackProviders,
       size: input.size,
+      quality: input.quality,
       kind: input.kind,
       metadata: input.metadata,
     };
