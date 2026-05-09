@@ -32,6 +32,7 @@
  * default `quality` to "medium" (15-30s).
  */
 
+import { createClient } from "@supabase/supabase-js";
 import type { ImageProvider, PollResult, SubmitOpts } from "./index";
 
 const OPENAI_EDITS_URL = "https://api.openai.com/v1/images/edits";
@@ -77,24 +78,29 @@ async function uploadResultToSupabase(
   const serviceKey = getRequiredEnv("SUPABASE_SERVICE_ROLE_KEY");
   const bucket = process.env.OPENAI_PROVIDER_BUCKET ?? "results";
 
-  const uploadUrl = `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
-  const res = await fetch(uploadUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${serviceKey}`,
-      "Content-Type": "image/png",
-      "x-upsert": "true",
-      "Cache-Control": "31536000",
-    },
-    body: new Uint8Array(pngBuffer),
+  // Use the supabase-js SDK rather than raw fetch + Bearer auth.
+  // The new `sb_secret_*` key format Supabase rolled out is NOT a JWT,
+  // so a raw `Authorization: Bearer sb_secret_…` request to Storage
+  // gets rejected with "Invalid Compact JWS". The SDK knows how to
+  // negotiate auth correctly for both legacy JWT and new sb_* keys.
+  const sb = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `Supabase Storage upload ${res.status}: ${text.slice(0, 300)}`,
-    );
+
+  const { error } = await sb.storage.from(bucket).upload(
+    path,
+    new Uint8Array(pngBuffer),
+    {
+      contentType: "image/png",
+      upsert: true,
+      cacheControl: "31536000",
+    },
+  );
+  if (error) {
+    throw new Error(`Supabase Storage upload failed: ${error.message}`);
   }
-  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+  const { data } = sb.storage.from(bucket).getPublicUrl(path);
+  return data.publicUrl;
 }
 
 async function submitOpenAi(opts: SubmitOpts): Promise<{ taskId: string }> {
