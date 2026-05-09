@@ -13,7 +13,7 @@ Three primitives:
 
 Plus reusable building blocks:
 
-- **Provider catalog** — `wavespeed-gpt-image-2`, `wavespeed-nano-banana-pro`, `wavespeed-nano-banana-fast`, `fal-gpt-image-2`. Selectable per request, with fallback support.
+- **Provider catalog** — `openai-gpt-image-2` (direct, no gateway), `wavespeed-gpt-image-2`, `wavespeed-nano-banana-pro`, `wavespeed-nano-banana-fast`, `fal-gpt-image-2`. Selectable per request, with fallback support.
 - **Admin auth** — `createAdminMiddleware`, `createAdminLoginRoute/Logout`, `<AdminLoginForm />`. Single-secret pattern; ~10 lines per project.
 - **Admin testbench** — `<MultiProviderRunner />`. Side-by-side compare across providers + per-family save buttons.
 - **Model families** — `getModelFamily(provider)` for per-family prompt storage (one prompt for `gpt-image-2` works for both gateways).
@@ -34,7 +34,7 @@ Pin to a SHA for stability: `commongenerator#abc1234`.
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-OPENAI_API_KEY=         # for analyzeImage
+OPENAI_API_KEY=         # for analyzeImage AND openai-gpt-image-2 provider (org must be verified for gpt-image-2)
 WAVESPEED_API_KEY=      # for any wavespeed-* provider
 FAL_API_KEY=            # for fal-gpt-image-2
 CLOUDINARY_CLOUD_NAME=  # for applyCloudinaryTransform

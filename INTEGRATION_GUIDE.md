@@ -81,7 +81,8 @@ commongenerator/
     ├── providers/
     │   ├── index.ts          # ImageProvider interface + registry
     │   ├── wavespeed.ts      # 3 Wavespeed-routed providers (gpt-image-2, nano-banana pro/fast)
-    │   └── fal.ts            # fal-gpt-image-2 (OpenAI via Fal.ai queue)
+    │   ├── fal.ts            # fal-gpt-image-2 (OpenAI via Fal.ai queue)
+    │   └── openai.ts         # openai-gpt-image-2 (direct, no gateway; synchronous)
     ├── auth/
     │   ├── index.ts          # public exports for `commongenerator/auth`
     │   ├── middleware-factory.ts   # createAdminMiddleware
@@ -159,16 +160,28 @@ stores the upstream task ID, returns the row ID.
 
 | Name | Gateway | Model | Notes |
 |---|---|---|---|
-| `wavespeed-gpt-image-2` | Wavespeed.ai | OpenAI gpt-image-2 | Default. Best for text-rich + multilingual scenes. |
+| `openai-gpt-image-2` | none (direct) | OpenAI gpt-image-2 | Synchronous — `submit()` does the full edit + uploads result PNG to Supabase Storage at `<generationId>.png`, returns the public URL as the taskId; `pollResult` is a no-op. Saves the 5-15s gateway POST overhead vs. wavespeed/fal but inference time is identical. Default `quality: "medium"`. **Requires org-verified OpenAI access to gpt-image-2.** |
+| `wavespeed-gpt-image-2` | Wavespeed.ai | OpenAI gpt-image-2 | Async gateway. Best when OpenAI direct access isn't available, or when you want the fallback chain to span gateways. |
 | `wavespeed-nano-banana-pro` | Wavespeed.ai | Google Nano Banana Pro | High fidelity, slower. |
 | `wavespeed-nano-banana-fast` | Wavespeed.ai | Google Nano Banana 2 Fast | Faster + cheaper tier. |
-| `fal-gpt-image-2` | Fal.ai queue | OpenAI gpt-image-2 | Same model as wavespeed-gpt-image-2 via a different gateway. Useful as a fallback. |
+| `fal-gpt-image-2` | Fal.ai queue | OpenAI gpt-image-2 | Same model as wavespeed-gpt-image-2 via a different gateway. Useful as a third fallback. |
 
 **Recommended default for new apps:**
 ```ts
-provider: "wavespeed-gpt-image-2",
-fallbackProviders: ["fal-gpt-image-2"],
+provider: "openai-gpt-image-2",
+fallbackProviders: ["wavespeed-gpt-image-2", "fal-gpt-image-2"],
 ```
+
+**Synchronous-provider caveat (`openai-gpt-image-2`):** the entire
+inference happens inside `provider.submit()`, which means the calling
+route's `maxDuration` must accommodate the full generation time
+(15-30s @ medium quality, 40-90s @ high). With `deferSubmit: true` on
+`createGenerateRoute`, this work runs in `next/server` `after()`
+which honors `maxDuration` on the route. Set `maxDuration = 60` for
+medium-quality use; bump higher (Pro plan: up to 800s) if you need
+high quality. Async gateways (wavespeed-*, fal-*) don't have this
+constraint — they only need the route to outlast the ~5-15s
+acknowledgment.
 
 **Fallback semantics:**
 - Transient errors (network, 5xx, 408, 429) → walk the chain.
@@ -285,7 +298,7 @@ same model behaves the same regardless of gateway. Use
 ### `getModelFamily(provider) → ModelFamily`
 
 Maps a provider name to its model family:
-- `wavespeed-gpt-image-2`, `fal-gpt-image-2` → `"gpt-image-2"`
+- `openai-gpt-image-2`, `wavespeed-gpt-image-2`, `fal-gpt-image-2` → `"gpt-image-2"`
 - `wavespeed-nano-banana-pro`, `wavespeed-nano-banana-fast` → `"nano-banana"`
 
 ### `createAdminMiddleware(config?) → Next middleware`
@@ -643,9 +656,9 @@ src/app/api/admin/settings/route.ts       ← optional: default-provider knob
 ### Per-family prompt schema (recommended)
 
 Store one prompt per **model family**, not per specific provider —
-`wavespeed-gpt-image-2` and `fal-gpt-image-2` route to the same
-underlying model so the same prompt works for both. Use
-`getModelFamily(provider)` to bucket.
+`openai-gpt-image-2`, `wavespeed-gpt-image-2`, and `fal-gpt-image-2`
+all route to the same underlying model so the same prompt works for
+all three. Use `getModelFamily(provider)` to bucket.
 
 Schema for the project's `prompts` table:
 
@@ -826,9 +839,10 @@ Per consuming app (each app has its own values):
 | `NEXT_PUBLIC_SUPABASE_URL` | always | Per-project Supabase URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | always | For client-side uploads to Storage |
 | `SUPABASE_SERVICE_ROLE_KEY` | always | Server-only, used by the engine |
-| `OPENAI_API_KEY` | when using `analyzeImage` | gpt-4o-mini calls |
+| `OPENAI_API_KEY` | when using `analyzeImage` OR `openai-gpt-image-2` | gpt-4o-mini for analyze; gpt-image-2 for direct image edits (org must be verified for gpt-image-2 access) |
 | `WAVESPEED_API_KEY` | when using a `wavespeed-*` provider | covers all 3 wavespeed model variants |
 | `FAL_API_KEY` | when using `fal-gpt-image-2` provider | |
+| `OPENAI_PROVIDER_BUCKET` | optional, only with `openai-gpt-image-2` | Supabase Storage bucket name for the synchronously-generated PNGs. Default `"results"`. |
 | `CLOUDINARY_CLOUD_NAME` | when calling `applyCloudinaryTransform` | |
 | `ADMIN_SECRET` | when admin auth middleware is wired | required for `/admin/*` access; without it, middleware returns 503 (refuses to operate unsafely). Generate with `openssl rand -base64 32`. |
 
