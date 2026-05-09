@@ -10,10 +10,11 @@
  * the `generations.provider` column for analytics + retry-debugging.
  *
  * Available providers:
- *   - wavespeed-gpt-image-2     (OpenAI gpt-image-2 via Wavespeed.ai)
- *   - wavespeed-nano-banana-pro (Google Nano Banana Pro via Wavespeed)
+ *   - wavespeed-gpt-image-2      (OpenAI gpt-image-2 via Wavespeed.ai)
+ *   - wavespeed-nano-banana-pro  (Google Nano Banana Pro via Wavespeed)
  *   - wavespeed-nano-banana-fast (faster/cheaper Nano Banana tier)
- *   - fal-gpt-image-2           (OpenAI gpt-image-2 via Fal.ai queue)
+ *   - fal-gpt-image-2            (OpenAI gpt-image-2 via Fal.ai queue)
+ *   - openai-gpt-image-2         (OpenAI gpt-image-2 direct, no gateway)
  *
  * To add a new provider: implement ImageProvider, register it in
  * REGISTRY below, add its name to ProviderName in ../types.ts.
@@ -26,16 +27,22 @@ export type SubmitOpts = {
   prompt: string;
   /** Optional output size hint. Each provider normalizes to its own
    *  preferred format (Wavespeed: "1024*1024" or aspect_ratio enum;
-   *  Fal: preset enum). */
+   *  Fal: preset enum; OpenAI direct: "1024x1024" / "1024x1536" /
+   *  "1536x1024"). */
   size?: string;
   /** Quality tier. Big speed/cost lever — gpt-image-2 reports
    *  ~5-10s @ low, 15-30s @ medium, 40-90s @ high. Defaults differ
    *  per provider:
-   *    - gpt-image-2 (Wavespeed + Fal): "medium" (was "high" pre-2026-04)
+   *    - gpt-image-2 (Wavespeed + Fal + direct OpenAI): "medium"
    *    - nano-banana variants: "high" (already a fast tier by name)
    *  Admin/test pages should expose this so the operator can pick the
    *  speed/fidelity tradeoff that fits the product. */
   quality?: "low" | "medium" | "high";
+  /** Optional row ID — passed by the engine. Used by synchronous
+   *  providers (e.g. openai-gpt-image-2) that persist the result to
+   *  Supabase Storage at a deterministic path so a downstream archive
+   *  step doesn't create a duplicate. Async gateways ignore it. */
+  generationId?: string;
 };
 
 export type PollResult =
@@ -57,12 +64,14 @@ import {
   wavespeedNanoBananaFast,
 } from "./wavespeed";
 import { falGptImage2 } from "./fal";
+import { openaiGptImage2 } from "./openai";
 
 const REGISTRY: Record<ProviderName, ImageProvider> = {
   "wavespeed-gpt-image-2": wavespeedGptImage2,
   "wavespeed-nano-banana-pro": wavespeedNanoBananaPro,
   "wavespeed-nano-banana-fast": wavespeedNanoBananaFast,
   "fal-gpt-image-2": falGptImage2,
+  "openai-gpt-image-2": openaiGptImage2,
 };
 
 export function getProvider(name: ProviderName): ImageProvider {
@@ -76,6 +85,7 @@ export const ALL_PROVIDERS: ProviderName[] = [
   "wavespeed-nano-banana-pro",
   "wavespeed-nano-banana-fast",
   "fal-gpt-image-2",
+  "openai-gpt-image-2",
 ];
 
 export function isValidProvider(name: string): name is ProviderName {

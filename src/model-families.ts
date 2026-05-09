@@ -27,6 +27,7 @@ export type ModelFamily =
 export const PROVIDER_FAMILY: Record<ProviderName, ModelFamily> = {
   "wavespeed-gpt-image-2": "gpt-image-2",
   "fal-gpt-image-2": "gpt-image-2",
+  "openai-gpt-image-2": "gpt-image-2",
   "wavespeed-nano-banana-pro": "nano-banana",
   "wavespeed-nano-banana-fast": "nano-banana",
 };

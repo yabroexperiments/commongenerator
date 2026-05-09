@@ -104,6 +104,10 @@ export async function submitGenerationToProvider(
         prompt: opts.prompt,
         size: opts.size,
         quality: opts.quality,
+        // Pass the row ID so synchronous providers (openai-gpt-image-2)
+        // can persist to a deterministic storage path. Gateway providers
+        // ignore it.
+        generationId: opts.id,
       });
       if (providerName !== primary) {
         await setProvider(opts.sb, opts.id, providerName);

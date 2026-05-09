@@ -6,7 +6,8 @@ export type ProviderName =
   | "wavespeed-gpt-image-2"
   | "wavespeed-nano-banana-pro"
   | "wavespeed-nano-banana-fast"
-  | "fal-gpt-image-2";
+  | "fal-gpt-image-2"
+  | "openai-gpt-image-2";
 
 export type GenerationStatus = "processing" | "completed" | "failed";
 
