@@ -81,6 +81,11 @@ export type MultiProviderRunnerProps = {
   onBeforeRun?: () => boolean | Promise<boolean>;
   /** Optional className on the outer wrapper (for Tailwind etc.). */
   className?: string;
+  /** If set, the matching panel gets a red ring + "IN PROD" badge so
+   *  operators can see at a glance which provider users hit by default
+   *  in production. Pass the same value as your `settings.default_provider`
+   *  row — typically loaded into local state from /api/admin/settings. */
+  productionProvider?: ProviderName;
 };
 
 export function MultiProviderRunner(props: MultiProviderRunnerProps) {
@@ -93,6 +98,7 @@ export function MultiProviderRunner(props: MultiProviderRunnerProps) {
     pollIntervalMs = 2000,
     onBeforeRun,
     className = "",
+    productionProvider,
   } = props;
 
   const [genIds, setGenIds] = useState<Partial<Record<ProviderName, string>>>(
@@ -183,6 +189,7 @@ export function MultiProviderRunner(props: MultiProviderRunnerProps) {
             pollIntervalMs={pollIntervalMs}
             onSave={onSave}
             resultActions={resultActions}
+            isProduction={p === productionProvider}
           />
         ))}
       </div>
@@ -201,6 +208,10 @@ type ResultPanelProps = {
     provider: ProviderName;
     resultUrl: string;
   }) => React.ReactNode;
+  /** True if this provider is the current production default. Adds a
+   *  red ring + "IN PROD" badge so the operator knows at a glance
+   *  which result is what real users see. */
+  isProduction?: boolean;
 };
 
 function ResultPanel({
@@ -209,6 +220,7 @@ function ResultPanel({
   pollIntervalMs,
   onSave,
   resultActions,
+  isProduction = false,
 }: ResultPanelProps) {
   const family: ModelFamily = getModelFamily(provider);
   const status = useGenerationStatus(genId, { intervalMs: pollIntervalMs });
@@ -240,7 +252,11 @@ function ResultPanel({
   return (
     <div
       style={{
-        border: "1px solid #e5e7eb",
+        // Production-default panels get a thick red ring + slight outer
+        // glow so they're impossible to miss in a 3-up grid. Other
+        // panels keep the neutral hairline border.
+        border: isProduction ? "2px solid #dc2626" : "1px solid #e5e7eb",
+        boxShadow: isProduction ? "0 0 0 4px rgba(220, 38, 38, 0.12)" : undefined,
         borderRadius: 12,
         overflow: "hidden",
         background: "white",
@@ -251,16 +267,40 @@ function ResultPanel({
       <div
         style={{
           padding: "10px 12px",
-          background: "#f9fafb",
-          borderBottom: "1px solid #e5e7eb",
+          background: isProduction ? "#fef2f2" : "#f9fafb",
+          borderBottom: isProduction ? "1px solid #fecaca" : "1px solid #e5e7eb",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 8,
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
-          {provider}
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>
+            {provider}
+          </div>
+          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+            family: {family}
+          </div>
         </div>
-        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-          family: {family}
-        </div>
+        {isProduction && (
+          <span
+            title="This is the provider real users hit by default in production"
+            style={{
+              flexShrink: 0,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              color: "white",
+              background: "#dc2626",
+              padding: "3px 7px",
+              borderRadius: 4,
+              whiteSpace: "nowrap",
+            }}
+          >
+            ● IN PROD
+          </span>
+        )}
       </div>
 
       <div
