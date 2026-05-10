@@ -33,6 +33,13 @@ export type GenerationRow = {
    *  style key, etc.) — engine doesn't read it, just stores/returns. */
   metadata: Record<string, unknown> | null;
   created_at: string;
+  /** Anonymous cookie UUID of the visitor who triggered this gen.
+   *  Set by createRateLimit; null when the route doesn't rate-limit. */
+  user_id: string | null;
+  /** Normalized email when the visitor entered one to unlock the
+   *  email-tier quota. NULL until they bypass. Counted alongside
+   *  user_id in subsequent rate-limit checks. */
+  user_email: string | null;
 };
 
 /** Input to startGeneration. */
@@ -55,6 +62,13 @@ export type StartGenerationInput = {
   kind?: string;
   /** Free-form jsonb the app wants stored alongside the row. */
   metadata?: Record<string, unknown>;
+  /** Anonymous cookie UUID for rate-limit attribution. Usually set by
+   *  the route factory after a successful createRateLimit check; apps
+   *  that bypass the route factory can pass it directly. */
+  userId?: string;
+  /** Normalized email when the visitor has bypassed the free tier
+   *  quota. Same source as userId. */
+  userEmail?: string | null;
 };
 
 /** Response from getGenerationStatus. */

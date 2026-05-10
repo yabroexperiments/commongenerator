@@ -75,6 +75,8 @@ export async function insertGenerationRow(
     prompt: opts.prompt,
     provider: primary,
     metadata: opts.metadata,
+    user_id: opts.userId ?? null,
+    user_email: opts.userEmail ?? null,
   });
   return id;
 }

@@ -43,6 +43,7 @@ import {
   submitGenerationToProvider,
 } from "../generate";
 import { isValidProvider } from "../providers";
+import type { RateLimitFn } from "../rate-limit";
 import type { ProviderName, StartGenerationInput } from "../types";
 
 export type CreateGenerateRouteOpts = {
@@ -69,6 +70,18 @@ export type CreateGenerateRouteOpts = {
    * provider.submit completing before the response.
    */
   deferSubmit?: boolean;
+  /**
+   * Optional per-user rate-limit hook. Runs BEFORE buildPrompt. If it
+   * returns ok=false, the route returns 429 with
+   *   { error, require_email, limit }
+   * and the Set-Cookie header from the hook (so the visitor's
+   * anonymous UUID is bound on rejected requests too).
+   *
+   * Build with `createRateLimit({ cookieName, freeLimitPerWindow,
+   * emailBypassLimitPerWindow, windowDays, ... })` from
+   * `commongenerator`.
+   */
+  rateLimit?: RateLimitFn;
 };
 
 export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
@@ -80,20 +93,52 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
       return jsonResponse({ error: "Invalid JSON body" }, 400);
     }
 
+    const sb = opts.getSupabase();
+
+    // Rate-limit gate (runs BEFORE buildPrompt — saves the prompt-build
+    // work on rejected requests and ensures the cookie is set for
+    // first-time visitors who immediately hit a cap somehow).
+    let userId: string | null = null;
+    let userEmail: string | null = null;
+    let cookieHeader: string | undefined;
+    if (opts.rateLimit) {
+      const rl = await opts.rateLimit({ request, sb });
+      if (!rl.ok) {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (rl.cookieHeader) headers["Set-Cookie"] = rl.cookieHeader;
+        return new Response(
+          JSON.stringify({
+            error: rl.reason,
+            require_email: rl.requireEmail,
+            limit: rl.limit,
+          }),
+          { status: 429, headers },
+        );
+      }
+      userId = rl.userId;
+      userEmail = rl.userEmail;
+      cookieHeader = rl.cookieHeader;
+    }
+
     let input: StartGenerationInput;
     try {
       input = await opts.buildPrompt({ body, request });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return jsonResponse({ error: message }, 400);
+      return jsonResponse({ error: message }, 400, cookieHeader);
     }
 
     const provider = input.provider ?? opts.defaultProvider ?? "wavespeed-gpt-image-2";
     if (!isValidProvider(provider)) {
-      return jsonResponse({ error: `Unknown provider: ${provider}` }, 400);
+      return jsonResponse(
+        { error: `Unknown provider: ${provider}` },
+        400,
+        cookieHeader,
+      );
     }
 
-    const sb = opts.getSupabase();
     const enginePayload = {
       sb,
       imageUrl: input.imageUrl,
@@ -104,6 +149,8 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
       quality: input.quality,
       kind: input.kind,
       metadata: input.metadata,
+      userId: userId ?? input.userId,
+      userEmail: userEmail ?? input.userEmail ?? null,
     };
 
     // Deferred path: insert row, kick off submit in after(), return now.
@@ -117,6 +164,7 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
         return jsonResponse(
           { error: "Failed to record generation", detail: message },
           500,
+          cookieHeader,
         );
       }
       // Provider.submit may take 5-15s. Run it after the response is sent.
@@ -132,27 +180,33 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
           );
         }
       });
-      return jsonResponse({ generation_id: id });
+      return jsonResponse({ generation_id: id }, 200, cookieHeader);
     }
 
     // Synchronous path: existing behavior.
     try {
       const { generationId } = await startGeneration(enginePayload);
-      return jsonResponse({ generation_id: generationId });
+      return jsonResponse({ generation_id: generationId }, 200, cookieHeader);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[commongenerator] /generate failed", err);
       return jsonResponse(
         { error: "Image generation failed to start", detail: message },
         502,
+        cookieHeader,
       );
     }
   };
 }
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
+function jsonResponse(
+  body: unknown,
+  status = 200,
+  cookieHeader?: string,
+): Response {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (cookieHeader) headers["Set-Cookie"] = cookieHeader;
+  return new Response(JSON.stringify(body), { status, headers });
 }

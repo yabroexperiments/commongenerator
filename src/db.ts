@@ -22,6 +22,8 @@ export async function insertGeneration(
     prompt: string;
     provider: ProviderName;
     metadata?: Record<string, unknown>;
+    user_id?: string | null;
+    user_email?: string | null;
   },
 ): Promise<void> {
   const { error } = await sb.from(TABLE).insert({
@@ -32,6 +34,8 @@ export async function insertGeneration(
     provider: row.provider,
     metadata: row.metadata ?? null,
     status: "processing",
+    user_id: row.user_id ?? null,
+    user_email: row.user_email ?? null,
   });
   if (error) {
     throw new Error(`generations insert failed: ${error.message}`);

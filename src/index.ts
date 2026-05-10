@@ -53,6 +53,20 @@ export {
 } from "./providers";
 export type { ImageProvider, SubmitOpts, PollResult } from "./providers";
 
+export {
+  createRateLimit,
+  isValidEmail,
+  normalizeEmail,
+  getCookie,
+  buildCookie,
+} from "./rate-limit";
+export type {
+  RateLimitFn,
+  RateLimitContext,
+  RateLimitResult,
+  CreateRateLimitOpts,
+} from "./rate-limit";
+
 export type {
   ProviderName,
   GenerationStatus,
