@@ -45,7 +45,12 @@ export {
 } from "./cloudinary";
 export type { ApplyCloudinaryTransformOpts } from "./cloudinary";
 
-export { getProvider, ALL_PROVIDERS, isValidProvider } from "./providers";
+export {
+  getProvider,
+  ALL_PROVIDERS,
+  DEFAULT_COMPARE_ORDER,
+  isValidProvider,
+} from "./providers";
 export type { ImageProvider, SubmitOpts, PollResult } from "./providers";
 
 export type {

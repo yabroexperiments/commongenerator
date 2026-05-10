@@ -88,6 +88,29 @@ export const ALL_PROVIDERS: ProviderName[] = [
   "openai-gpt-image-2",
 ];
 
+/**
+ * The canonical left-to-right order for the admin testbench compare
+ * panels. Every consumer's <MultiProviderRunner /> should pass this
+ * (or spread from it) so the side-by-side order stays consistent
+ * across all 狗仔 sister apps (gogo-gallery, dograting, future ones).
+ *
+ * Order rationale (best → fast):
+ *   1. openai-gpt-image-2         — best raw quality, "no proxy" reference
+ *   2. wavespeed-nano-banana-pro  — best identity preservation, fast
+ *   3. wavespeed-nano-banana-fast — speed/cost tier baseline
+ *
+ * Proxy duplicates of #1 (`fal-gpt-image-2`, `wavespeed-gpt-image-2`)
+ * are intentionally NOT in the default — they're meant for production
+ * fallback chains, not testbench head-to-head. Apps that want a 4-up
+ * compare can spread them in:
+ *   `[...DEFAULT_COMPARE_ORDER, "fal-gpt-image-2"]`
+ */
+export const DEFAULT_COMPARE_ORDER: ProviderName[] = [
+  "openai-gpt-image-2",
+  "wavespeed-nano-banana-pro",
+  "wavespeed-nano-banana-fast",
+];
+
 export function isValidProvider(name: string): name is ProviderName {
   return (ALL_PROVIDERS as string[]).includes(name);
 }
