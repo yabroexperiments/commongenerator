@@ -6,3 +6,6 @@ export type { CreateStatusRouteOpts } from "./status";
 
 export { createEmailBypassRoute } from "./email-bypass";
 export type { CreateEmailBypassRouteOpts } from "./email-bypass";
+
+export { createQuotaRoute } from "./quota";
+export type { CreateQuotaRouteOpts } from "./quota";

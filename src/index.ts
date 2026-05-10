@@ -55,6 +55,7 @@ export type { ImageProvider, SubmitOpts, PollResult } from "./providers";
 
 export {
   createRateLimit,
+  checkQuota,
   isValidEmail,
   normalizeEmail,
   getCookie,
@@ -65,6 +66,7 @@ export type {
   RateLimitContext,
   RateLimitResult,
   CreateRateLimitOpts,
+  QuotaState,
 } from "./rate-limit";
 
 export type {

@@ -92,84 +92,148 @@ const DEFAULT_MSG_FREE =
 const DEFAULT_MSG_EMAIL =
   "You've reached today's limit. Please come back tomorrow.";
 
-export function createRateLimit(opts: CreateRateLimitOpts): RateLimitFn {
+/** Snapshot of a visitor's quota state. Used internally by
+ *  createRateLimit and exposed via createQuotaRoute so frontends can
+ *  render an "X of N used today" badge. */
+export type QuotaState = {
+  userId: string;
+  userEmail: string | null;
+  used: number;
+  limit: number;
+  /** Convenience flag: true when the user has not yet bypassed via
+   *  email AND is at-or-over the free-tier cap (i.e. entering an
+   *  email would unlock more). False once they've bypassed. */
+  requireEmail: boolean;
+  /** True if the visitor is using the admin bypass — quota count is
+   *  not tracked, displayed as Infinity. Frontends typically hide
+   *  the badge in this case. */
+  isAdmin: boolean;
+  /** Cookie header to attach to the response if a new UUID was minted. */
+  cookieHeader?: string;
+};
+
+/** Read the visitor's quota state — issues a UUID cookie if missing,
+ *  looks up email-bypass status, counts rows in the window. Pure
+ *  read; no side effects beyond the cookie mint. Shared between
+ *  createRateLimit (decides allow/deny) and createQuotaRoute (just
+ *  returns the state to the frontend). */
+export async function checkQuota(
+  ctx: RateLimitContext,
+  opts: CreateRateLimitOpts,
+): Promise<QuotaState> {
   const free = opts.freeLimitPerWindow ?? DEFAULT_FREE;
   const bypass = opts.emailBypassLimitPerWindow ?? DEFAULT_EMAIL;
   const windowDays = opts.windowDays ?? DEFAULT_WINDOW_DAYS;
   const cookieMaxAge = opts.cookieMaxAgeSeconds ?? DEFAULT_COOKIE_AGE_S;
+
+  // Admin shortcut — still issues a UUID for attribution but doesn't count.
+  if (opts.skipForAdminCookie) {
+    const adminVal = getCookie(ctx.request, opts.skipForAdminCookie);
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (adminVal && adminSecret && adminVal === adminSecret) {
+      let userId = getCookie(ctx.request, opts.cookieName);
+      let cookieHeader: string | undefined;
+      if (!userId) {
+        userId = crypto.randomUUID();
+        cookieHeader = buildCookie(opts.cookieName, userId, cookieMaxAge);
+      }
+      return {
+        userId,
+        userEmail: null,
+        used: 0,
+        limit: Number.POSITIVE_INFINITY,
+        requireEmail: false,
+        isAdmin: true,
+        cookieHeader,
+      };
+    }
+  }
+
+  // Read-or-mint the anonymous cookie UUID.
+  let userId = getCookie(ctx.request, opts.cookieName);
+  let cookieHeader: string | undefined;
+  if (!userId) {
+    userId = crypto.randomUUID();
+    cookieHeader = buildCookie(opts.cookieName, userId, cookieMaxAge);
+  }
+
+  // Look up email-bypass status for this cookie.
+  const { data: emailRow } = await ctx.sb
+    .from("user_emails")
+    .select("email_normalized")
+    .eq("user_id", userId)
+    .maybeSingle<{ email_normalized: string }>();
+  const userEmail = emailRow?.email_normalized ?? null;
+  const limit = userEmail ? bypass : free;
+
+  // Count generations in window.
+  const since = new Date(
+    Date.now() - windowDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  let countQuery = ctx.sb
+    .from("generations")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", since);
+  if (userEmail) {
+    countQuery = countQuery.eq("user_email", userEmail);
+  } else {
+    countQuery = countQuery.eq("user_id", userId);
+  }
+  const { count, error: countErr } = await countQuery;
+  if (countErr) {
+    // Fail-open: if we can't count, treat as 0 used. The rateLimit
+    // wrapper will then allow the request rather than hard-blocking
+    // on infra failures. Identity (userId, cookieHeader) still flows.
+    console.error("[commongenerator] checkQuota count failed", countErr);
+    return {
+      userId,
+      userEmail,
+      used: 0,
+      limit,
+      requireEmail: false,
+      isAdmin: false,
+      cookieHeader,
+    };
+  }
+
+  const used = count ?? 0;
+  return {
+    userId,
+    userEmail,
+    used,
+    limit,
+    requireEmail: !userEmail && used >= free,
+    isAdmin: false,
+    cookieHeader,
+  };
+}
+
+export function createRateLimit(opts: CreateRateLimitOpts): RateLimitFn {
   const msgFree = opts.exceededMessageFree ?? DEFAULT_MSG_FREE;
   const msgEmail = opts.exceededMessageEmail ?? DEFAULT_MSG_EMAIL;
 
   return async function rateLimit(
     ctx: RateLimitContext,
   ): Promise<RateLimitResult> {
-    // 1. Admin-bypass shortcut.
-    if (opts.skipForAdminCookie) {
-      const adminVal = getCookie(ctx.request, opts.skipForAdminCookie);
-      const adminSecret = process.env.ADMIN_SECRET;
-      if (adminVal && adminSecret && adminVal === adminSecret) {
-        // Still issue a UUID cookie if missing, so admin runs are
-        // still attributable in the row data. But don't count.
-        let userId = getCookie(ctx.request, opts.cookieName);
-        let cookieHeader: string | undefined;
-        if (!userId) {
-          userId = crypto.randomUUID();
-          cookieHeader = buildCookie(opts.cookieName, userId, cookieMaxAge);
-        }
-        return { ok: true, userId, userEmail: null, cookieHeader };
-      }
-    }
+    const state = await checkQuota(ctx, opts);
 
-    // 2. Read-or-mint the anonymous cookie UUID.
-    let userId = getCookie(ctx.request, opts.cookieName);
-    let cookieHeader: string | undefined;
-    if (!userId) {
-      userId = crypto.randomUUID();
-      cookieHeader = buildCookie(opts.cookieName, userId, cookieMaxAge);
-    }
-
-    // 3. Look up email-bypass status for this cookie.
-    const { data: emailRow } = await ctx.sb
-      .from("user_emails")
-      .select("email_normalized")
-      .eq("user_id", userId)
-      .maybeSingle<{ email_normalized: string }>();
-    const userEmail = emailRow?.email_normalized ?? null;
-    const limit = userEmail ? bypass : free;
-
-    // 4. Count generations in window.
-    const since = new Date(
-      Date.now() - windowDays * 24 * 60 * 60 * 1000,
-    ).toISOString();
-    let countQuery = ctx.sb
-      .from("generations")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", since);
-    if (userEmail) {
-      countQuery = countQuery.eq("user_email", userEmail);
-    } else {
-      countQuery = countQuery.eq("user_id", userId);
-    }
-    const { count, error: countErr } = await countQuery;
-    if (countErr) {
-      // Fail-open: if we can't count, allow the request rather than
-      // hard-blocking on infra failures. Still set the cookie so the
-      // identity persists.
-      console.error("[commongenerator] rate-limit count failed", countErr);
-      return { ok: true, userId, userEmail, cookieHeader };
-    }
-
-    if ((count ?? 0) >= limit) {
+    // Admin or under cap — allow.
+    if (state.isAdmin || state.used < state.limit) {
       return {
-        ok: false,
-        reason: userEmail ? msgEmail : msgFree,
-        requireEmail: !userEmail,
-        limit,
-        cookieHeader,
+        ok: true,
+        userId: state.userId,
+        userEmail: state.userEmail,
+        cookieHeader: state.cookieHeader,
       };
     }
 
-    return { ok: true, userId, userEmail, cookieHeader };
+    return {
+      ok: false,
+      reason: state.userEmail ? msgEmail : msgFree,
+      requireEmail: state.requireEmail,
+      limit: state.limit,
+      cookieHeader: state.cookieHeader,
+    };
   };
 }
 
