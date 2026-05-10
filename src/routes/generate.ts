@@ -44,6 +44,7 @@ import {
 } from "../generate";
 import { isValidProvider } from "../providers";
 import type { RateLimitFn } from "../rate-limit";
+import { verifyTurnstileToken } from "../turnstile";
 import type { ProviderName, StartGenerationInput } from "../types";
 
 export type CreateGenerateRouteOpts = {
@@ -82,6 +83,23 @@ export type CreateGenerateRouteOpts = {
    * `commongenerator`.
    */
   rateLimit?: RateLimitFn;
+  /**
+   * Optional Cloudflare Turnstile check. When set, the route reads
+   * `body[tokenField]` (default "turnstile_token"), verifies it
+   * against Cloudflare's siteverify endpoint, and returns 403 on
+   * failure. Runs BEFORE rateLimit so a bot's request never hits the
+   * count query.
+   *
+   * Required env: TURNSTILE_SECRET_KEY. Frontend renders a Turnstile
+   * widget (see <TurnstileWidget /> from commongenerator/react) and
+   * passes the token in the POST body.
+   */
+  verifyTurnstile?: {
+    /** Body field carrying the Turnstile token. Default "turnstile_token". */
+    tokenField?: string;
+    /** Override the env-read secret key (rarely needed). */
+    secretKey?: string;
+  };
 };
 
 export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
@@ -94,6 +112,32 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
     }
 
     const sb = opts.getSupabase();
+
+    // Turnstile gate (runs FIRST — bots' requests don't hit the DB).
+    if (opts.verifyTurnstile) {
+      const tokenField = opts.verifyTurnstile.tokenField ?? "turnstile_token";
+      const token = body[tokenField];
+      const remoteIp =
+        request.headers.get("cf-connecting-ip") ??
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+        undefined;
+      const result = await verifyTurnstileToken(
+        typeof token === "string" ? token : "",
+        {
+          secretKey: opts.verifyTurnstile.secretKey,
+          remoteIp,
+        },
+      );
+      if (!result.success) {
+        return jsonResponse(
+          {
+            error: "Bot challenge failed. Please refresh and try again.",
+            error_codes: result.errorCodes,
+          },
+          403,
+        );
+      }
+    }
 
     // Rate-limit gate (runs BEFORE buildPrompt — saves the prompt-build
     // work on rejected requests and ensures the cookie is set for

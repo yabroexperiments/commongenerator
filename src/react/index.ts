@@ -15,3 +15,6 @@ export type { EmailBypassStatus, UseEmailBypassOpts } from "./use-email-bypass";
 
 export { useQuota } from "./use-quota";
 export type { QuotaSnapshot, UseQuotaOpts } from "./use-quota";
+
+export { TurnstileWidget } from "./turnstile-widget";
+export type { TurnstileWidgetProps } from "./turnstile-widget";

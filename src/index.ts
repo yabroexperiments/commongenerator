@@ -69,6 +69,9 @@ export type {
   QuotaState,
 } from "./rate-limit";
 
+export { verifyTurnstileToken } from "./turnstile";
+export type { TurnstileVerifyResult, VerifyTurnstileOpts } from "./turnstile";
+
 export type {
   ProviderName,
   GenerationStatus,
