@@ -55,6 +55,31 @@ function mapSize(size: string | undefined): string {
   return "1024x1024";
 }
 
+/** Cloudinary serves uploaded files as-is by default. iPhone photos
+ *  arrive as wide-gamut Display P3 JPEGs which OpenAI's gpt-image-2
+ *  endpoint rejects with "invalid_image_file" / "Invalid image file
+ *  or mode". Inserting `f_jpg,q_auto,c_limit,w_2048` after `/upload/`
+ *  makes Cloudinary re-encode in sRGB JPEG, capped at 2048px wide,
+ *  with auto quality — the safe input shape for OpenAI.
+ *
+ *  This is a no-op for non-Cloudinary URLs and a no-op when the URL
+ *  already has transforms applied. */
+function normalizeImageUrlForOpenAi(url: string): string {
+  const m = url.match(
+    /^(https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/)(.+)$/,
+  );
+  if (!m) return url;
+  const [, prefix, rest] = m;
+  // First segment after /upload/ — if it looks like a transform string
+  // (contains commas, or starts with `<letter>_`), the caller already
+  // applied transforms, don't double-insert.
+  const firstSeg = rest!.split("/")[0]!;
+  if (firstSeg.includes(",") || /^[a-z]_/.test(firstSeg)) {
+    return url;
+  }
+  return `${prefix}f_jpg,q_auto,c_limit,w_2048/${rest}`;
+}
+
 async function downloadSourceImage(
   url: string,
 ): Promise<{ blob: Blob; filename: string }> {
@@ -63,8 +88,10 @@ async function downloadSourceImage(
     throw new Error(`Failed to fetch source image ${res.status}`);
   }
   const blob = await res.blob();
-  // OpenAI accepts PNG/JPEG/WebP. Cloudinary often serves JPEG; rename
-  // the multipart filename so OpenAI's content-type sniffing is happy.
+  // OpenAI accepts PNG/JPEG/WebP. After the Cloudinary transform above
+  // we always get JPEG; for non-Cloudinary URLs trust the response
+  // Content-Type. Rename the multipart filename so OpenAI's content
+  // sniffing is happy.
   const ct = blob.type || "image/jpeg";
   const ext = ct.includes("png") ? "png" : ct.includes("webp") ? "webp" : "jpg";
   return { blob, filename: `input.${ext}` };
@@ -106,7 +133,8 @@ async function uploadResultToSupabase(
 async function submitOpenAi(opts: SubmitOpts): Promise<{ taskId: string }> {
   const apiKey = getRequiredEnv("OPENAI_API_KEY");
 
-  const { blob, filename } = await downloadSourceImage(opts.imageUrl);
+  const sourceUrl = normalizeImageUrlForOpenAi(opts.imageUrl);
+  const { blob, filename } = await downloadSourceImage(sourceUrl);
 
   const fd = new FormData();
   fd.append("model", "gpt-image-2");
