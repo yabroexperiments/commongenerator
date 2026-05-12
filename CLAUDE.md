@@ -1,5 +1,26 @@
 # CLAUDE.md — commongenerator (shared engine for the 狗仔 family)
 
+## Cross-machine workflow (Claude Code · Codex CLI · Codex Web)
+
+This project syncs through GitHub. Same rules apply wherever you operate.
+
+**Session start:**
+1. `git pull --ff-only` (skip on Codex Web — the container is already at HEAD).
+2. Read the latest `.handoffs/*.md` and `.handoffs/INDEX.md` — the bridge from the previous session.
+
+**Session end (mandatory):**
+1. Write `.handoffs/YYYY-MM-DD-<task>.md` with: Done · Left · Gotchas · Files touched · How to resume.
+2. Commit + push everything stable. Feature branches (`feat/...`) for half-done work. No force-push to `main`. No committing `.env` or any real secret.
+
+**File convention:**
+- `CLAUDE.md` is the canonical project brief. `AGENTS.md` in the same directory is a **symlink** to it — both names resolve to the same content for Claude Code and Codex.
+- Never replace `AGENTS.md` with a regular file (atomic-save tools can do this). Use in-place writes.
+- If `AGENTS.md` ever becomes a regular file: `rm AGENTS.md && ln -s CLAUDE.md AGENTS.md`. Server-side enforcement: `.github/workflows/agents-symlink.yml`. Local enforcement: `.githooks/pre-commit`.
+
+**Fresh clone setup (one-time):** `./setup.sh` — wires up the tracked git hooks.
+
+---
+
 > This file is for someone **editing the engine itself**. If you're
 > just consuming the engine from a child app, read `INTEGRATION_GUIDE.md`
 > and `README.md` instead.

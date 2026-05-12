@@ -1,0 +1,17 @@
+#!/bin/sh
+# AGENTS.md symlink integrity check (tracked at .githooks/).
+# Enabled per-clone via ./setup.sh which runs `git config core.hooksPath .githooks`.
+if [ -e AGENTS.md ] && [ -e CLAUDE.md ]; then
+  if [ ! -L AGENTS.md ]; then
+    echo "✗ pre-commit: AGENTS.md is no longer a symlink to CLAUDE.md."
+    echo "  An atomic-save editor may have replaced the symlink with a regular file."
+    echo "  Restore with: rm AGENTS.md && ln -s CLAUDE.md AGENTS.md"
+    exit 1
+  fi
+  target=$(readlink AGENTS.md)
+  if [ "$target" != "CLAUDE.md" ]; then
+    echo "✗ pre-commit: AGENTS.md points to $target instead of CLAUDE.md."
+    exit 1
+  fi
+fi
+exit 0
