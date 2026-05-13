@@ -53,6 +53,18 @@ export function useGenerationStatus(
   useEffect(() => {
     if (!id) return;
 
+    // Reset state for the new id. Without this, panels in
+    // <MultiProviderRunner /> render the PREVIOUS result during the
+    // ~500ms+ window between "id assigned" and "first poll returns":
+    // status stays "completed" + imageUrl stays the old URL until a
+    // new "completed" tick overwrites it. Same problem for error /
+    // metadata / originalImageUrl on re-runs after a failure.
+    setStatus("processing");
+    setImageUrl(null);
+    setError(null);
+    setOriginalImageUrl(null);
+    setMetadata(null);
+
     let cancelled = false;
     const startedAt = Date.now();
 

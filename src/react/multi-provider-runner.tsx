@@ -249,6 +249,15 @@ function ResultPanel({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Reset the "Saved ✓" affirmation when a new run starts, so the
+  // Save button isn't stuck disabled on a fresh result. genId is the
+  // single signal that "this is a new generation"; saving/saved both
+  // clear when it changes.
+  useEffect(() => {
+    setSaved(false);
+    setSaving(false);
+  }, [genId]);
+
   return (
     <div
       style={{
