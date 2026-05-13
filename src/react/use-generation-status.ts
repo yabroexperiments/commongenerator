@@ -62,20 +62,30 @@ export function useGenerationStatus(
   const [originalImageUrl, setOriginalImageUrl] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<Record<string, unknown> | null>(null);
 
-  useEffect(() => {
-    if (!id) return;
-
-    // Reset state for the new id. Without this, panels in
-    // <MultiProviderRunner /> render the PREVIOUS result during the
-    // ~500ms+ window between "id assigned" and "first poll returns":
-    // status stays "completed" + imageUrl stays the old URL until a
-    // new "completed" tick overwrites it. Same problem for error /
-    // metadata / originalImageUrl on re-runs after a failure.
+  // Reset state DURING RENDER when id changes — not in useEffect.
+  // Effects run AFTER commit, which means the first render with a
+  // new id would otherwise show the PREVIOUS result's status +
+  // imageUrl until the effect ran and queued the reset. In a
+  // testbench where the first poll can land before the reset's
+  // re-render commits, React batches the two updates and the user
+  // never sees the "Generating…" intermediate state at all — they
+  // see the previous image, then the new one, with no loading state
+  // in between. This is React's documented pattern for "state
+  // derived from props": store the prop, compare, reset during
+  // render. See react.dev → useState § "Storing information from
+  // previous renders".
+  const [prevId, setPrevId] = useState(id);
+  if (id !== prevId) {
+    setPrevId(id);
     setStatus("processing");
     setImageUrl(null);
     setError(null);
     setOriginalImageUrl(null);
     setMetadata(null);
+  }
+
+  useEffect(() => {
+    if (!id) return;
 
     let cancelled = false;
     const startedAt = Date.now();
