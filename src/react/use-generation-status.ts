@@ -15,7 +15,7 @@
  * `/api/status/${id}`.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { GenerationStatus } from "../types";
 
 export type UseGenerationStatusOpts = {
@@ -42,7 +42,19 @@ export function useGenerationStatus(
 ): UseGenerationStatusResult {
   const intervalMs = opts.intervalMs ?? 2500;
   const timeoutMs = opts.timeoutMs ?? 300_000;
-  const endpoint = opts.endpoint ?? ((rid: string) => `/api/status/${rid}`);
+  // Stabilize the endpoint reference. Without useMemo, the fallback
+  // arrow creates a NEW function on every render, which makes the
+  // polling effect below tear down + re-run every render — which in
+  // turn re-fires the state reset and momentarily clears imageUrl.
+  // Visible to the user as the result image flickering in/out
+  // whenever anything in the parent component re-renders (the
+  // elapsed-time setInterval in MultiProviderRunner's ResultPanel
+  // alone causes 4 re-renders/sec while processing).
+  const optsEndpoint = opts.endpoint;
+  const endpoint = useMemo(
+    () => optsEndpoint ?? ((rid: string) => `/api/status/${rid}`),
+    [optsEndpoint],
+  );
 
   const [status, setStatus] = useState<GenerationStatus>("processing");
   const [imageUrl, setImageUrl] = useState<string | null>(null);
