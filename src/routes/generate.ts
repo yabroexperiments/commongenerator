@@ -100,6 +100,21 @@ export type CreateGenerateRouteOpts = {
     /** Override the env-read secret key (rarely needed). */
     secretKey?: string;
   };
+  /**
+   * Hard cap on the total number of input images (`imageUrl` +
+   * `additionalImageUrls`) per generation. When the count from
+   * `buildPrompt` exceeds this, the route returns 400 with a clear
+   * error message before any DB insert or provider call.
+   *
+   * Apps own the value: single-photo apps set `maxImages: 1`,
+   * multi-photo apps set whatever cap their UX supports (e.g. 5).
+   * Omitted = no engine-level cap (apps can still validate in
+   * buildPrompt themselves). Recommended to always set this — it
+   * gives consumers a single declared source-of-truth for "how many
+   * images is this app willing to accept" and guards against client
+   * bugs that construct oversized inputs.
+   */
+  maxImages?: number;
 };
 
 export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
@@ -172,6 +187,25 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return jsonResponse({ error: message }, 400, cookieHeader);
+    }
+
+    // Enforce the per-app image cap. Runs after buildPrompt so apps
+    // can normalize body shapes (e.g. accept either `upload_url` or
+    // `upload_urls[]`) before we count. Total = 1 (the primary
+    // imageUrl) + additionalImageUrls.length.
+    if (opts.maxImages !== undefined) {
+      const totalImages = 1 + (input.additionalImageUrls?.length ?? 0);
+      if (totalImages > opts.maxImages) {
+        return jsonResponse(
+          {
+            error: `Too many images: got ${totalImages}, max ${opts.maxImages}`,
+            max_images: opts.maxImages,
+            received_images: totalImages,
+          },
+          400,
+          cookieHeader,
+        );
+      }
     }
 
     const provider = input.provider ?? opts.defaultProvider ?? "wavespeed-gpt-image-2";
