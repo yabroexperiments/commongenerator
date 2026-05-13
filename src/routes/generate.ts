@@ -43,7 +43,7 @@ import {
   submitGenerationToProvider,
 } from "../generate";
 import { isValidProvider } from "../providers";
-import type { RateLimitFn } from "../rate-limit";
+import { getCookie, type RateLimitFn } from "../rate-limit";
 import { verifyTurnstileToken } from "../turnstile";
 import type { ProviderName, StartGenerationInput } from "../types";
 
@@ -99,6 +99,13 @@ export type CreateGenerateRouteOpts = {
     tokenField?: string;
     /** Override the env-read secret key (rarely needed). */
     secretKey?: string;
+    /** Optional: skip the Turnstile gate when this admin cookie's value
+     *  equals the ADMIN_SECRET env var. Mirrors createRateLimit's
+     *  `skipForAdminCookie` so operators running /admin/test (which
+     *  doesn't mount the Turnstile widget) aren't blocked by the gate.
+     *  Pass the same cookie name the app's admin middleware sets
+     *  (e.g. "dograting_admin"). */
+    skipForAdminCookie?: string;
   };
   /**
    * Hard cap on the total number of input images (`imageUrl` +
@@ -130,27 +137,45 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
 
     // Turnstile gate (runs FIRST — bots' requests don't hit the DB).
     if (opts.verifyTurnstile) {
-      const tokenField = opts.verifyTurnstile.tokenField ?? "turnstile_token";
-      const token = body[tokenField];
-      const remoteIp =
-        request.headers.get("cf-connecting-ip") ??
-        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-        undefined;
-      const result = await verifyTurnstileToken(
-        typeof token === "string" ? token : "",
-        {
-          secretKey: opts.verifyTurnstile.secretKey,
-          remoteIp,
-        },
-      );
-      if (!result.success) {
-        return jsonResponse(
-          {
-            error: "Bot challenge failed. Please refresh and try again.",
-            error_codes: result.errorCodes,
-          },
-          403,
+      // Admin-cookie bypass: operators running /admin/test don't have
+      // the Turnstile widget mounted, so the request carries no token
+      // and would always fail. When the configured admin cookie is
+      // present AND its value matches ADMIN_SECRET, skip the gate —
+      // same pattern as createRateLimit.skipForAdminCookie.
+      let skipForAdmin = false;
+      if (opts.verifyTurnstile.skipForAdminCookie) {
+        const adminVal = getCookie(
+          request,
+          opts.verifyTurnstile.skipForAdminCookie,
         );
+        const adminSecret = process.env.ADMIN_SECRET;
+        if (adminVal && adminSecret && adminVal === adminSecret) {
+          skipForAdmin = true;
+        }
+      }
+      if (!skipForAdmin) {
+        const tokenField = opts.verifyTurnstile.tokenField ?? "turnstile_token";
+        const token = body[tokenField];
+        const remoteIp =
+          request.headers.get("cf-connecting-ip") ??
+          request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+          undefined;
+        const result = await verifyTurnstileToken(
+          typeof token === "string" ? token : "",
+          {
+            secretKey: opts.verifyTurnstile.secretKey,
+            remoteIp,
+          },
+        );
+        if (!result.success) {
+          return jsonResponse(
+            {
+              error: "Bot challenge failed. Please refresh and try again.",
+              error_codes: result.errorCodes,
+            },
+            403,
+          );
+        }
       }
     }
 
