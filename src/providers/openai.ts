@@ -133,12 +133,33 @@ async function uploadResultToSupabase(
 async function submitOpenAi(opts: SubmitOpts): Promise<{ taskId: string }> {
   const apiKey = getRequiredEnv("OPENAI_API_KEY");
 
-  const sourceUrl = normalizeImageUrlForOpenAi(opts.imageUrl);
-  const { blob, filename } = await downloadSourceImage(sourceUrl);
+  // OpenAI's /v1/images/edits accepts repeated `image[]` form fields
+  // for multi-image input (up to 16). The model uses all of them as
+  // visual reference — first photo is the "primary", extras add more
+  // identity / pose context. We treat opts.imageUrl as the primary
+  // and append opts.additionalImageUrls (if any) in order.
+  const primarySource = normalizeImageUrlForOpenAi(opts.imageUrl);
+  const extraSources = (opts.additionalImageUrls ?? []).map(
+    normalizeImageUrlForOpenAi,
+  );
+  const allSources = [primarySource, ...extraSources];
+
+  const downloads = await Promise.all(
+    allSources.map((url) => downloadSourceImage(url)),
+  );
 
   const fd = new FormData();
   fd.append("model", "gpt-image-2");
-  fd.append("image", blob, filename);
+  // Single-image: use the `image` field name (back-compat with previous
+  // single-image behavior). Multi-image: use repeated `image[]` fields
+  // per OpenAI's documented multi-input form for gpt-image-2.
+  if (downloads.length === 1) {
+    fd.append("image", downloads[0]!.blob, downloads[0]!.filename);
+  } else {
+    downloads.forEach((d, i) => {
+      fd.append("image[]", d.blob, `input-${i}.${d.filename.split(".").pop()}`);
+    });
+  }
   fd.append("prompt", opts.prompt);
   fd.append("size", mapSize(opts.size));
   // Default "medium" — same speed/fidelity tradeoff as the Wavespeed/Fal

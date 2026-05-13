@@ -68,13 +68,24 @@ export async function insertGenerationRow(
 ): Promise<string> {
   const id = opts.id ?? crypto.randomUUID();
   const primary = opts.provider ?? "wavespeed-gpt-image-2";
+  // When extra reference images are passed (multi-image input), persist
+  // them under metadata.additional_image_urls so post-completion hooks
+  // (cropping, archival, analytics) and result pages still see the
+  // full set. The original_image_url column stays single by design.
+  let metadata = opts.metadata;
+  if (opts.additionalImageUrls && opts.additionalImageUrls.length > 0) {
+    metadata = {
+      ...(metadata ?? {}),
+      additional_image_urls: opts.additionalImageUrls,
+    };
+  }
   await insertGeneration(opts.sb, {
     id,
     kind: opts.kind,
     original_image_url: opts.imageUrl,
     prompt: opts.prompt,
     provider: primary,
-    metadata: opts.metadata,
+    metadata,
     user_id: opts.userId ?? null,
     user_email: opts.userEmail ?? null,
   });
@@ -103,6 +114,7 @@ export async function submitGenerationToProvider(
     try {
       const { taskId } = await provider.submit({
         imageUrl: opts.imageUrl,
+        additionalImageUrls: opts.additionalImageUrls,
         prompt: opts.prompt,
         size: opts.size,
         quality: opts.quality,

@@ -24,6 +24,13 @@ import type { ProviderName } from "../types";
 
 export type SubmitOpts = {
   imageUrl: string;
+  /** Optional extra reference images. Models that accept multiple
+   *  inputs (notably OpenAI gpt-image-2 via /v1/images/edits with
+   *  repeated `image[]` form fields, up to 16) use them as additional
+   *  visual context. Providers that don't support multi-image silently
+   *  ignore this field and use `imageUrl` alone. Cap: callers should
+   *  keep total images ≤ 5 to stay within reasonable upstream limits. */
+  additionalImageUrls?: string[];
   prompt: string;
   /** Optional output size hint. Each provider normalizes to its own
    *  preferred format (Wavespeed: "1024*1024" or aspect_ratio enum;

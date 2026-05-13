@@ -45,6 +45,14 @@ export type GenerationRow = {
 /** Input to startGeneration. */
 export type StartGenerationInput = {
   imageUrl: string;
+  /** Optional extra reference images. Forwarded to providers that
+   *  support multi-image input (currently openai-gpt-image-2 via
+   *  /v1/images/edits `image[]` repeated form fields, up to 16). The
+   *  engine persists these in `metadata.additional_image_urls` on the
+   *  generations row so post-completion hooks can still see them.
+   *  Cap: keep total images ≤ 5 to stay within reasonable upstream
+   *  payload limits. */
+  additionalImageUrls?: string[];
   prompt: string;
   /** Primary provider. Default "wavespeed-gpt-image-2". */
   provider?: ProviderName;

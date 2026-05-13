@@ -186,6 +186,7 @@ export function createGenerateRoute(opts: CreateGenerateRouteOpts) {
     const enginePayload = {
       sb,
       imageUrl: input.imageUrl,
+      additionalImageUrls: input.additionalImageUrls,
       prompt: input.prompt,
       provider,
       fallbackProviders: input.fallbackProviders,
