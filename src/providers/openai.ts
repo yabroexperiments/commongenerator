@@ -166,6 +166,15 @@ async function submitOpenAi(opts: SubmitOpts): Promise<{ taskId: string }> {
   // gpt-image-2 providers. Override per-call via opts.quality.
   fd.append("quality", opts.quality ?? "medium");
   fd.append("n", "1");
+  // Background transparency — only added when explicitly requested.
+  // OpenAI's default is "auto" (model decides). Setting "transparent"
+  // forces a real alpha channel in the output PNG — way more reliable
+  // than asking the model nicely in the prompt and post-processing.
+  // Caller is responsible for keeping output_format=png (default) so
+  // the alpha channel survives encoding.
+  if (opts.background) {
+    fd.append("background", opts.background);
+  }
 
   const aiRes = await fetch(OPENAI_EDITS_URL, {
     method: "POST",

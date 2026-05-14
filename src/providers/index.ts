@@ -50,6 +50,16 @@ export type SubmitOpts = {
    *  Supabase Storage at a deterministic path so a downstream archive
    *  step doesn't create a duplicate. Async gateways ignore it. */
   generationId?: string;
+  /** Background transparency hint. Only honored by openai-gpt-image-2
+   *  today — passed as the `background` form field on
+   *  /v1/images/edits. Values:
+   *    - "transparent" — output PNG has a proper alpha channel.
+   *                       Most reliable way to get see-through stickers.
+   *    - "opaque"      — output is solid (default in most prompts).
+   *    - "auto"        — model decides based on the prompt (OpenAI default).
+   *  Other providers (wavespeed, fal, nano-banana) silently ignore;
+   *  use prompt-side instructions for them. */
+  background?: "transparent" | "opaque" | "auto";
 };
 
 export type PollResult =
