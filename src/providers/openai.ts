@@ -97,6 +97,20 @@ async function downloadSourceImage(
   return { blob, filename: `input.${ext}` };
 }
 
+/** How many times to attempt the Supabase Storage upload. The
+ *  OpenAI inference is already complete + paid for by the time we
+ *  reach this step; we just need to persist the result. Transient
+ *  flakes (concurrent-upload throttling at the Storage gateway,
+ *  reported as `400 Bad Request` rather than `429`) are common when
+ *  several sticker generations finish at once and all try to upload
+ *  in parallel. Retry rather than throw away an already-billed
+ *  inference. */
+const UPLOAD_MAX_ATTEMPTS = 3;
+/** Base delay (ms) for exponential backoff between upload attempts.
+ *  Sequence at base=2000: ~2s, ~4s + jitter. Total worst-case wait
+ *  before final throw: ~6s. */
+const UPLOAD_RETRY_BASE_MS = 2000;
+
 async function uploadResultToSupabase(
   pngBuffer: Buffer,
   path: string,
@@ -114,20 +128,33 @@ async function uploadResultToSupabase(
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { error } = await sb.storage.from(bucket).upload(
-    path,
-    new Uint8Array(pngBuffer),
-    {
-      contentType: "image/png",
-      upsert: true,
-      cacheControl: "31536000",
-    },
-  );
-  if (error) {
-    throw new Error(`Supabase Storage upload failed: ${error.message}`);
+  let lastError: string | null = null;
+  for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
+    const { error } = await sb.storage.from(bucket).upload(
+      path,
+      new Uint8Array(pngBuffer),
+      {
+        contentType: "image/png",
+        upsert: true,
+        cacheControl: "31536000",
+      },
+    );
+    if (!error) {
+      const { data } = sb.storage.from(bucket).getPublicUrl(path);
+      return data.publicUrl;
+    }
+    lastError = error.message;
+    if (attempt === UPLOAD_MAX_ATTEMPTS) break;
+    const sleepMs =
+      UPLOAD_RETRY_BASE_MS * Math.pow(2, attempt - 1) + Math.random() * 500;
+    console.warn(
+      `[openai-gpt-image-2] storage upload attempt ${attempt}/${UPLOAD_MAX_ATTEMPTS} failed (${error.message}); retrying in ${Math.round(sleepMs)}ms path=${path}`,
+    );
+    await new Promise((r) => setTimeout(r, sleepMs));
   }
-  const { data } = sb.storage.from(bucket).getPublicUrl(path);
-  return data.publicUrl;
+  throw new Error(
+    `Supabase Storage upload failed after ${UPLOAD_MAX_ATTEMPTS} attempts: ${lastError}`,
+  );
 }
 
 async function submitOpenAi(opts: SubmitOpts): Promise<{ taskId: string }> {
