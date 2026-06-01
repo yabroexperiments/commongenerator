@@ -64,6 +64,13 @@ export type MultiProviderRunnerProps = {
   buildBody: (provider: ProviderName) => Record<string, unknown>;
   /** POST endpoint. Default "/api/generate". */
   endpoint?: string;
+  /** Status-polling endpoint builder, threaded to each panel's
+   *  `useGenerationStatus`. Default `/api/status/${id}`. REQUIRED for
+   *  consumers mounted under a Next.js basePath — the browser's native
+   *  fetch does NOT prepend basePath, so the default root-relative URL
+   *  404s silently and panels poll forever. Pass
+   *  `(id) => apiPath(`/api/status/${id}`)`. */
+  statusEndpoint?: (id: string) => string;
   /** Optional save handler. If provided, each successful result panel
    *  shows a "Save prompt" button that calls this with the provider.
    *  App's handler reads its own form state to know what to save. */
@@ -93,6 +100,7 @@ export function MultiProviderRunner(props: MultiProviderRunnerProps) {
     providers,
     buildBody,
     endpoint = "/api/generate",
+    statusEndpoint,
     onSave,
     resultActions,
     pollIntervalMs = 2000,
@@ -187,6 +195,7 @@ export function MultiProviderRunner(props: MultiProviderRunnerProps) {
             provider={p}
             genId={genIds[p] ?? null}
             pollIntervalMs={pollIntervalMs}
+            statusEndpoint={statusEndpoint}
             onSave={onSave}
             resultActions={resultActions}
             isProduction={p === productionProvider}
@@ -203,6 +212,9 @@ type ResultPanelProps = {
   provider: ProviderName;
   genId: string | null;
   pollIntervalMs: number;
+  /** Threaded to useGenerationStatus so basePath consumers poll the
+   *  right URL. Undefined → hook's default `/api/status/${id}`. */
+  statusEndpoint?: (id: string) => string;
   onSave?: (provider: ProviderName) => Promise<void> | void;
   resultActions?: (ctx: {
     provider: ProviderName;
@@ -218,12 +230,16 @@ function ResultPanel({
   provider,
   genId,
   pollIntervalMs,
+  statusEndpoint,
   onSave,
   resultActions,
   isProduction = false,
 }: ResultPanelProps) {
   const family: ModelFamily = getModelFamily(provider);
-  const status = useGenerationStatus(genId, { intervalMs: pollIntervalMs });
+  const status = useGenerationStatus(genId, {
+    intervalMs: pollIntervalMs,
+    endpoint: statusEndpoint,
+  });
 
   // Track elapsed time from the moment a genId is set until terminal.
   const [elapsed, setElapsed] = useState(0);
