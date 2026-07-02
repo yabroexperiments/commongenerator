@@ -51,7 +51,13 @@ export {
   DEFAULT_COMPARE_ORDER,
   isValidProvider,
 } from "./providers";
-export type { ImageProvider, SubmitOpts, PollResult } from "./providers";
+export type {
+  ImageProvider,
+  SubmitOpts,
+  SubmitResult,
+  SubmitUsage,
+  PollResult,
+} from "./providers";
 
 export {
   createRateLimit,

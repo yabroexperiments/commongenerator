@@ -67,10 +67,31 @@ export type PollResult =
   | { status: "completed"; imageUrl: string }
   | { status: "failed"; error: string };
 
+/** Token usage reported by the provider for one image-generation call.
+ *  Currently populated only by openai-gpt-image-2 (the /v1/images/edits
+ *  response carries a `usage` object). Other providers leave it
+ *  undefined. Consumers use this to compute the real per-call cost
+ *  from OpenAI's published per-token rates. */
+export type SubmitUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  input_tokens_details?: {
+    text_tokens?: number;
+    image_tokens?: number;
+  };
+};
+
+export type SubmitResult = {
+  taskId: string;
+  /** Present when the provider reports per-call token usage. */
+  usage?: SubmitUsage;
+};
+
 export interface ImageProvider {
   name: ProviderName;
   /** Submit and return a provider-specific task ID for later polling. */
-  submit(opts: SubmitOpts): Promise<{ taskId: string }>;
+  submit(opts: SubmitOpts): Promise<SubmitResult>;
   /** Poll the provider for current state. */
   pollResult(taskId: string): Promise<PollResult>;
 }

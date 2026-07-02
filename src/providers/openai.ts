@@ -33,7 +33,12 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
-import type { ImageProvider, PollResult, SubmitOpts } from "./index";
+import type {
+  ImageProvider,
+  PollResult,
+  SubmitOpts,
+  SubmitResult,
+} from "./index";
 
 const OPENAI_EDITS_URL = "https://api.openai.com/v1/images/edits";
 
@@ -157,7 +162,7 @@ async function uploadResultToSupabase(
   );
 }
 
-async function submitOpenAi(opts: SubmitOpts): Promise<{ taskId: string }> {
+async function submitOpenAi(opts: SubmitOpts): Promise<SubmitResult> {
   const apiKey = getRequiredEnv("OPENAI_API_KEY");
 
   // OpenAI's /v1/images/edits accepts repeated `image[]` form fields
@@ -216,6 +221,12 @@ async function submitOpenAi(opts: SubmitOpts): Promise<{ taskId: string }> {
   }
   const json = (await aiRes.json()) as {
     data?: Array<{ b64_json?: string; url?: string }>;
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      total_tokens?: number;
+      input_tokens_details?: { text_tokens?: number; image_tokens?: number };
+    };
   };
   const b64 = json.data?.[0]?.b64_json;
   if (!b64) {
@@ -232,7 +243,9 @@ async function submitOpenAi(opts: SubmitOpts): Promise<{ taskId: string }> {
     : `openai-${crypto.randomUUID()}.png`;
   const publicUrl = await uploadResultToSupabase(buffer, path);
 
-  return { taskId: publicUrl };
+  // Surface the per-call token usage so consumers can compute the real
+  // cost of this generation (text-in + image-in + image-out tokens).
+  return { taskId: publicUrl, usage: json.usage };
 }
 
 async function pollOpenAi(taskId: string): Promise<PollResult> {
