@@ -198,6 +198,18 @@ keep it app-side.
 
 ---
 
+## Recently added primitives (2026-07-20 — privacy hardening)
+
+| Primitive | What it gives consumers |
+|---|---|
+| `createStatusRoute({ ownerGate })` | **Opt-in owner-gated status reads.** Without it, the status poll returns `original_image_url` (the uploaded SOURCE photo) + `prompt` + the full `metadata` blob to ANY caller who knows the generation UUID — an IDOR that leaks source photos + PII, since that UUID travels in share links. `ownerGate: { cookieName, adminCookie?: { name, secret } }` compares the rate-limit cookie to the row's `user_id`; only the owner (or admin) gets the private fields, everyone else gets the shareable subset (status + result `image_url` + error) with the private fields **null**. Backwards-compatible: omit `ownerGate` → unchanged (returns everything). Requires the consumer to pass the SAME `cookieName` it gave `createRateLimit`. |
+| `GenerationStatusResponse.userId` | `getGenerationStatus` now also returns the row's `user_id` (owner attribution) so an HTTP layer can decide ownership. Populated on every return path. |
+| `StartGenerationInput.rewriteCloudinarySource` | Opt-out (default `true`) for the openai provider's `f_jpg,q_auto,c_limit,w_2048` Cloudinary source rewrite. Pass `false` for private / `authenticated` / signed source URLs whose signature the appended transform would break. Threaded `types.ts → generate.ts submitGenerationToProvider → SubmitOpts → openai.ts`. NB: `normalizeImageUrlForOpenAi` already no-ops on `/image/authenticated/` URLs, so this flag is belt-and-suspenders for signed delivery, not load-bearing. |
+
+**Design note — owner-gate is opt-in on purpose.** A consumer's status poll runs while the owner is on the page (their cookie is present), so the owner always passes; only leaked/shared UUIDs get redacted. Making it default-on would break any consumer that didn't configure `cookieName`, so it ships opt-in per the "never break consumers" rule. gogolinesticker's status route pre-dates this and instead whitelists the response for EVERYONE (stricter — it needs no owner check because no client reads the private fields).
+
+---
+
 ## Provider abstraction notes
 
 The `ImageProvider` interface assumes **submit + poll** semantics —
@@ -255,6 +267,25 @@ stack. Document any future ones here.
   processing forever. Recommend consumers add a server-side lazy-
   flip on their result page (call `getGenerationStatus` once before
   rendering processing state).
+- **Consumer status routes are the #1 IDOR** across the 狗仔 family.
+  A bare `createStatusRoute` (or a hand-rolled `select('*')` status
+  route) leaks the source photo + PII to any UUID holder. dograting +
+  furrybooth both shipped this leak; fixed 2026-07-20 via `ownerGate`
+  (engine) / inline owner-gating (furrybooth's app-owned route).
+  Sibling checklist when auditing a new consumer: status route,
+  `/api/diagnose`-style dumps, and any unauth `select('*')`.
+- **Cloudinary retention needs the API secret.** Deleting source
+  photos (retention) uses the Cloudinary *destroy* API — same
+  `CLOUDINARY_API_KEY`/`CLOUDINARY_API_SECRET` env as signed uploads.
+  An app on the old unsigned-preset upload has NO server secret, so
+  signed uploads + retention must ship together and the operator must
+  add the secret to Vercel BEFORE deploy (else `/api/sign-upload`
+  503s → uploads break).
+- **Claude Code on the web git proxy 403s ref DELETIONS.** You can
+  push branches + commits, but `git push origin --delete <branch>`
+  fails 403, and the GitHub MCP exposes no delete-branch tool. Clean
+  up merged branches from the GitHub UI or a local machine, not from
+  a web session.
 
 ---
 
