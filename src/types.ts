@@ -104,4 +104,11 @@ export type GenerationStatusResponse = {
    *  hooks (e.g. extract data from the result image, send a
    *  notification email). False if the row was already terminal. */
   justCompleted?: boolean;
+  /** Anonymous cookie UUID of the visitor who created this generation
+   *  (mirrors GenerationRow.user_id). Surfaced so an HTTP layer can
+   *  decide ownership — e.g. createStatusRoute's ownerGate compares it
+   *  to the caller's rate-limit cookie before returning the source
+   *  photo / prompt / metadata. Null when the row was created without
+   *  rate-limit attribution. */
+  userId?: string | null;
 };

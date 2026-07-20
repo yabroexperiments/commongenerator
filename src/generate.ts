@@ -204,6 +204,7 @@ export async function getGenerationStatus(
       originalImageUrl: row.original_image_url,
       prompt: row.prompt,
       metadata: row.metadata,
+      userId: row.user_id,
     };
   }
 
@@ -216,6 +217,7 @@ export async function getGenerationStatus(
       originalImageUrl: row.original_image_url,
       prompt: row.prompt,
       metadata: row.metadata,
+      userId: row.user_id,
     };
   }
 
@@ -234,6 +236,7 @@ export async function getGenerationStatus(
       originalImageUrl: row.original_image_url,
       prompt: row.prompt,
       metadata: row.metadata,
+      userId: row.user_id,
     };
   }
 
@@ -259,6 +262,7 @@ export async function getGenerationStatus(
       originalImageUrl: row.original_image_url,
       prompt: row.prompt,
       metadata: row.metadata,
+      userId: row.user_id,
       // Row was processing when we started this call; we just flipped
       // it to completed. Caller can fire one-time post-completion hooks.
       justCompleted: true,
@@ -274,6 +278,7 @@ export async function getGenerationStatus(
       originalImageUrl: row.original_image_url,
       prompt: row.prompt,
       metadata: row.metadata,
+      userId: row.user_id,
     };
   }
 
@@ -284,6 +289,7 @@ export async function getGenerationStatus(
     originalImageUrl: row.original_image_url,
     prompt: row.prompt,
     metadata: row.metadata,
+    userId: row.user_id,
   };
 }
 
