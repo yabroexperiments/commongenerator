@@ -16,6 +16,16 @@
  */
 
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
+
+/** Constant-time string compare (length-safe) so the login check doesn't
+ *  leak how many leading chars of the secret matched via timing. */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
 
 export type AdminLoginRouteConfig = {
   envVar?: string;
@@ -43,7 +53,7 @@ export function createAdminLoginRoute(config: AdminLoginRouteConfig = {}) {
         { status: 503 },
       );
     }
-    if (!body.secret || body.secret !== expected) {
+    if (!body.secret || !safeEqual(body.secret, expected)) {
       return NextResponse.json({ error: "Wrong secret" }, { status: 401 });
     }
     const res = NextResponse.json({ ok: true });

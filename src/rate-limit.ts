@@ -281,14 +281,14 @@ export function getCookie(req: Request, name: string): string | null {
 }
 
 /** Build a Set-Cookie header value with sane defaults: HttpOnly,
- *  SameSite=Lax, root path. We deliberately omit the `Secure` flag so
- *  this also works on http://localhost during dev — Vercel-hosted
- *  prod is HTTPS-only anyway, and the cookie carries no secrets (just
- *  a UUID), so the missing Secure flag isn't a real risk. */
+ *  SameSite=Lax, root path. Adds `Secure` in production so the uid cookie
+ *  is never sent over plaintext HTTP; omitted otherwise so it still works
+ *  on http://localhost during dev. (The value is just a UUID — no secret.) */
 export function buildCookie(
   name: string,
   value: string,
   maxAgeSeconds: number,
 ): string {
-  return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${maxAgeSeconds}`;
 }

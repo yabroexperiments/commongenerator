@@ -32,6 +32,17 @@
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { timingSafeEqual } from "crypto";
+
+/** Constant-time string compare. Length-safe (timingSafeEqual throws on
+ *  unequal-length buffers). Used for the admin-cookie check so the compare
+ *  time doesn't leak how many leading chars of the secret matched. */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
 
 export type AdminMiddlewareConfig = {
   /** Env var holding the secret. Default "ADMIN_SECRET". */
@@ -85,7 +96,7 @@ export function createAdminMiddleware(config: AdminMiddlewareConfig = {}) {
     }
 
     const token = request.cookies.get(cookieName)?.value;
-    if (token === expected) {
+    if (token != null && safeEqual(token, expected)) {
       return NextResponse.next();
     }
 
