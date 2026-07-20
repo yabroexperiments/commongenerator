@@ -60,6 +60,13 @@ export type SubmitOpts = {
    *  Other providers (wavespeed, fal, nano-banana) silently ignore;
    *  use prompt-side instructions for them. */
   background?: "transparent" | "opaque" | "auto";
+  /** When false, openai-gpt-image-2 skips the Cloudinary source-URL
+   *  rewrite (`f_jpg,q_auto,c_limit,w_2048`). Set false for private /
+   *  already-signed Cloudinary or Supabase URLs whose signature an
+   *  appended transform segment would invalidate. Default (undefined /
+   *  true) keeps the rewrite. Threaded from StartGenerationInput; other
+   *  providers ignore it. */
+  rewriteCloudinarySource?: boolean;
 };
 
 export type PollResult =

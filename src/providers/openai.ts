@@ -170,10 +170,15 @@ async function submitOpenAi(opts: SubmitOpts): Promise<SubmitResult> {
   // visual reference — first photo is the "primary", extras add more
   // identity / pose context. We treat opts.imageUrl as the primary
   // and append opts.additionalImageUrls (if any) in order.
-  const primarySource = normalizeImageUrlForOpenAi(opts.imageUrl);
-  const extraSources = (opts.additionalImageUrls ?? []).map(
-    normalizeImageUrlForOpenAi,
-  );
+  // The Cloudinary sRGB-JPEG rewrite is on by default. Callers pass
+  // rewriteCloudinarySource:false when their source URLs are private /
+  // already-signed (Cloudinary authenticated delivery, or a signed
+  // Supabase bucket URL) — appending a transform segment there would
+  // break the signature and 401 the download.
+  const applyRewrite = opts.rewriteCloudinarySource !== false; // default true
+  const prep = (u: string) => (applyRewrite ? normalizeImageUrlForOpenAi(u) : u);
+  const primarySource = prep(opts.imageUrl);
+  const extraSources = (opts.additionalImageUrls ?? []).map(prep);
   const allSources = [primarySource, ...extraSources];
 
   const downloads = await Promise.all(

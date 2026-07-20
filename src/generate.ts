@@ -122,6 +122,10 @@ export async function submitGenerationToProvider(
         // can persist to a deterministic storage path. Gateway providers
         // ignore it.
         generationId: opts.id,
+        // Let the caller opt out of the openai provider's Cloudinary
+        // source-URL rewrite (for private / signed URLs). Gateway
+        // providers ignore it.
+        rewriteCloudinarySource: opts.rewriteCloudinarySource,
       });
       if (providerName !== primary) {
         await setProvider(opts.sb, opts.id, providerName);

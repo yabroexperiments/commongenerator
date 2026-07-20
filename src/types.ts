@@ -77,6 +77,16 @@ export type StartGenerationInput = {
   /** Normalized email when the visitor has bypassed the free tier
    *  quota. Same source as userId. */
   userEmail?: string | null;
+  /** When false, the openai-gpt-image-2 provider does NOT rewrite
+   *  Cloudinary source URLs with the `f_jpg,q_auto,c_limit,w_2048`
+   *  transform. Set false when you pass private / already-signed
+   *  (authenticated) Cloudinary URLs, or non-Cloudinary signed URLs
+   *  (e.g. a private Supabase bucket) whose signature an appended
+   *  transform would break. Default (undefined / true) keeps the
+   *  current rewrite behavior — safe because consumers already
+   *  compress client-side to sRGB JPEG, so the transform is
+   *  vestigial. Only the openai provider reads this; gateways ignore. */
+  rewriteCloudinarySource?: boolean;
 };
 
 /** Response from getGenerationStatus. */
