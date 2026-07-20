@@ -28,6 +28,39 @@ This project syncs through GitHub. Same rules apply wherever you operate.
 > Read this AND `PetBusiness/CLAUDE.md` (the umbrella) at the start
 > of every session.
 
+## Auth hardening (2026-07-20)
+
+- **Admin-secret compares are constant-time.** `createAdminMiddleware`
+  (`src/auth/middleware-factory.ts`) and `createAdminLoginRoute`
+  (`src/auth/login-route-factory.ts`) compare the cookie/secret with a
+  length-safe `timingSafeEqual` (local `safeEqual` helper in each), not
+  `===`/`!==`, so match time can't leak how many leading chars of
+  `ADMIN_SECRET` were correct. Keep this shape for any new secret compare.
+- **The uid cookie gets `Secure` in production.** `buildCookie`
+  (`src/rate-limit.ts`) appends `; Secure` when `NODE_ENV=production`
+  (omitted in dev so `http://localhost` still works). The value is an
+  unguessable HttpOnly UUID.
+- **uid-cookie HMAC signing was deliberately NOT added.** It would
+  invalidate every existing cookie (a one-time quota reset for all live
+  users of every consumer) for a low-value threat — the value is already an
+  unguessable HttpOnly UUID and gen ownership is UUID-gated. Don't add it
+  without a real reason + a migration plan.
+- **`createStatusRoute` has an opt-in `ownerGate`** (added `32b3035`) so the
+  polling endpoint can 404 non-owners instead of leaking a generation's
+  original-photo URL / prompt / metadata (an IDOR — gen ids appear in share
+  URLs). It's opt-in for back-compat: pass `ownerGate: { cookieName,
+  adminCookie }` to enable. dograting uses it; gogo/furrybooth override the
+  route or gate themselves. New consumers using the engine status route
+  directly SHOULD set it.
+- **These are LOW/defense-in-depth and change NO behavior for a consumer
+  until it bumps the pinned SHA.** Consumer bump = `npm install
+  commongenerator` + commit `package-lock.json` + deploy. ⚠️ On a
+  git+https-pinned consumer (furrybooth), `npm install` rewrites the pin to
+  `git+ssh` + the `github:` shorthand and drags sibling git deps along — do
+  a **surgical SHA-only edit of `package-lock.json`** instead (replace just
+  the `commongenerator.git#<oldSHA>` → `#<newSHA>`, preserving protocol,
+  leaving commonpayment/commonpod untouched); verify `git diff` is one line.
+
 ---
 
 ## Who I Am
