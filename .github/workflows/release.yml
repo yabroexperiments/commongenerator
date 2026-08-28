@@ -1,0 +1,41 @@
+# Publish this package to GitHub Packages on a version tag.
+#
+# Why this exists: consumers used to install this package as a GIT dependency
+# (github:yabroexperiments/commongenerator#<sha>). A git dep is a source
+# checkout, so npm cannot verify an integrity hash for it and must run the
+# `prepare: tsc` script on the consumer's machine to produce dist/. npm 12
+# refuses both by default, which breaks every consumer's install outright.
+#
+# A published tarball ships dist/ prebuilt, carries a real integrity hash, and
+# cannot be republished at the same version — so a version number becomes a
+# genuine content pin. See whatsappsticker/docs/registry-migration-plan.md.
+#
+# Publishing uses the Actions-provided GITHUB_TOKEN, so no personal access
+# token has to be minted or rotated for releases. (Consumers still need a
+# read:packages token to INSTALL — GitHub Packages requires auth to read.)
+name: Publish package
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@yabroexperiments"
+      - run: npm ci
+      # `prepare: tsc` runs as part of publish, building dist/ into the tarball.
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

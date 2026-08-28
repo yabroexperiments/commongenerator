@@ -1,8 +1,14 @@
 {
-  "name": "commongenerator",
+  "name": "@yabroexperiments/commongenerator",
   "version": "0.1.0",
   "description": "Shared image-generation engine for the 狗仔 product family.",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yabroexperiments/commongenerator.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
