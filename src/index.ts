@@ -84,4 +84,5 @@ export type {
   GenerationRow,
   StartGenerationInput,
   GenerationStatusResponse,
+  FetchLike,
 } from "./types";

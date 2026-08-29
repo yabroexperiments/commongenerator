@@ -20,7 +20,7 @@
  * REGISTRY below, add its name to ProviderName in ../types.ts.
  */
 
-import type { ProviderName } from "../types";
+import type { FetchLike, ProviderName } from "../types";
 
 export type SubmitOpts = {
   imageUrl: string;
@@ -67,6 +67,13 @@ export type SubmitOpts = {
    *  true) keeps the rewrite. Threaded from StartGenerationInput; other
    *  providers ignore it. */
   rewriteCloudinarySource?: boolean;
+  /** Optional fetch for the internal Supabase Storage client that
+   *  openai-gpt-image-2 constructs from env vars to archive its result
+   *  PNG — the one engine write that bypasses the consumer's own `sb`.
+   *  Pass a guarded fetch (e.g. a live-guard wrapper) to bring that
+   *  write under the consumer's guard. Default: undefined → global
+   *  fetch (unchanged). Other providers ignore it. */
+  supabaseFetch?: FetchLike;
 };
 
 export type PollResult =

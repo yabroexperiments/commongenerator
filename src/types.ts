@@ -2,6 +2,14 @@
  * Shared types — re-exported from src/index.ts.
  */
 
+/** Minimal fetch signature — matches `typeof fetch` structurally so a
+ *  consumer can pass either the global fetch or a wrapper around it
+ *  (e.g. a live-guard fetch that throws on unarmed local prod writes). */
+export type FetchLike = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
 export type ProviderName =
   | "wavespeed-gpt-image-2"
   | "wavespeed-nano-banana-pro"
@@ -87,6 +95,17 @@ export type StartGenerationInput = {
    *  compress client-side to sRGB JPEG, so the transform is
    *  vestigial. Only the openai provider reads this; gateways ignore. */
   rewriteCloudinarySource?: boolean;
+  /** Optional fetch implementation for the INTERNAL Supabase Storage
+   *  client that openai-gpt-image-2 builds from env vars to archive
+   *  its result PNG. That client is the one write path in the engine
+   *  that does NOT go through the consumer-passed `sb` — so a consumer
+   *  that guards its own client via `global.fetch` injection (e.g. a
+   *  live-guard that blocks unarmed local prod writes) should pass the
+   *  same guarded fetch here to close the gap. Default: undefined →
+   *  supabase-js uses the global fetch (behavior unchanged). Only the
+   *  openai provider reads this; gateway providers have no internal
+   *  Supabase client and ignore it. */
+  supabaseFetch?: FetchLike;
 };
 
 /** Response from getGenerationStatus. */

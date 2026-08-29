@@ -126,6 +126,10 @@ export async function submitGenerationToProvider(
         // source-URL rewrite (for private / signed URLs). Gateway
         // providers ignore it.
         rewriteCloudinarySource: opts.rewriteCloudinarySource,
+        // Guarded fetch for the openai provider's INTERNAL Supabase
+        // Storage client (result-PNG archive) — the one engine write
+        // that bypasses `sb`. Gateway providers ignore it.
+        supabaseFetch: opts.supabaseFetch,
       });
       if (providerName !== primary) {
         await setProvider(opts.sb, opts.id, providerName);

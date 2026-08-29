@@ -39,6 +39,7 @@ import type {
   SubmitOpts,
   SubmitResult,
 } from "./index";
+import type { FetchLike } from "../types";
 
 const OPENAI_EDITS_URL = "https://api.openai.com/v1/images/edits";
 
@@ -119,6 +120,7 @@ const UPLOAD_RETRY_BASE_MS = 2000;
 async function uploadResultToSupabase(
   pngBuffer: Buffer,
   path: string,
+  fetchImpl?: FetchLike,
 ): Promise<string> {
   const supabaseUrl = getRequiredEnv("NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_URL");
   const serviceKey = getRequiredEnv("SUPABASE_SERVICE_ROLE_KEY");
@@ -129,8 +131,13 @@ async function uploadResultToSupabase(
   // so a raw `Authorization: Bearer sb_secret_…` request to Storage
   // gets rejected with "Invalid Compact JWS". The SDK knows how to
   // negotiate auth correctly for both legacy JWT and new sb_* keys.
+  //
+  // When the caller passed a fetch (SubmitOpts.supabaseFetch), inject
+  // it so this write goes through the consumer's guard; otherwise omit
+  // `global` entirely and the SDK uses the global fetch (unchanged).
   const sb = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    ...(fetchImpl ? { global: { fetch: fetchImpl } } : {}),
   });
 
   let lastError: string | null = null;
@@ -246,7 +253,7 @@ async function submitOpenAi(opts: SubmitOpts): Promise<SubmitResult> {
   const path = opts.generationId
     ? `${opts.generationId}.png`
     : `openai-${crypto.randomUUID()}.png`;
-  const publicUrl = await uploadResultToSupabase(buffer, path);
+  const publicUrl = await uploadResultToSupabase(buffer, path, opts.supabaseFetch);
 
   // Surface the per-call token usage so consumers can compute the real
   // cost of this generation (text-in + image-in + image-out tokens).
