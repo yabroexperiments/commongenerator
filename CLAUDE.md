@@ -190,6 +190,19 @@ does NOT cause Vercel to pick it up on the next consumer deploy.
 The consumer's lock has to be bumped + committed for Vercel to fetch
 the new engine code. **Empty redeploy commits do not help.**
 
+**Critical #2 (2026-08-29): even a REAL lock bump does not reach a
+Vercel build whose install command is the default `npm install`.**
+Vercel restores the previous build's `node_modules`, and `npm install`
+then reports `up to date in <1s` and keeps the OLD engine — this
+package's `version` field never changes (consumers pin SHAs), so npm
+sees nothing stale, and the lock's new SHA is silently ignored.
+Observed on furrybooth deploy `dpl_CpKKvLJH…`: the deploy of the very
+commit that bumped the lock failed typecheck against the old engine's
+types. Fix: every consumer's `vercel.json` sets
+`"installCommand": "npm ci"` (npm ci deletes node_modules first, so a
+cached tree can never mask a lock change). furrybooth (`67144b4`) and
+dograting (`c1802d7`) have it; check any NEW consumer at first bump.
+
 This is the #1 confusing-failure-mode for engine bumps. Document
 it in the commit message when you ship to make sure the operator
 running the consumer-side bump knows.
@@ -240,6 +253,14 @@ keep it app-side.
 | `StartGenerationInput.rewriteCloudinarySource` | Opt-out (default `true`) for the openai provider's `f_jpg,q_auto,c_limit,w_2048` Cloudinary source rewrite. Pass `false` for private / `authenticated` / signed source URLs whose signature the appended transform would break. Threaded `types.ts → generate.ts submitGenerationToProvider → SubmitOpts → openai.ts`. NB: `normalizeImageUrlForOpenAi` already no-ops on `/image/authenticated/` URLs, so this flag is belt-and-suspenders for signed delivery, not load-bearing. |
 
 **Design note — owner-gate is opt-in on purpose.** A consumer's status poll runs while the owner is on the page (their cookie is present), so the owner always passes; only leaked/shared UUIDs get redacted. Making it default-on would break any consumer that didn't configure `cookieName`, so it ships opt-in per the "never break consumers" rule. gogolinesticker's status route pre-dates this and instead whitelists the response for EVERYONE (stricter — it needs no owner check because no client reads the private fields).
+
+---
+
+## Recently added primitives (2026-08-29 — live-guard injectable fetch)
+
+| Primitive | What it gives consumers |
+|---|---|
+| `StartGenerationInput.supabaseFetch` / `SubmitOpts.supabaseFetch` (type `FetchLike`, exported) | **Injectable fetch for the openai provider's INTERNAL Supabase Storage client.** `openai-gpt-image-2` archives its result PNG through a client it builds ITSELF from env vars — the one engine write that bypasses the consumer-passed `sb`, and therefore bypasses any live-guard a consumer injects via its own client's `global.fetch` (workspace FACTS.md §87). Pass the consumer's guarded fetch here and that write goes through the same guard. Threaded `types.ts → generate.ts submitGenerationToProvider → SubmitOpts → openai.ts createClient({ global: { fetch } })`; also works when calling `provider.submit()` directly (furrybooth) or from `createGenerateRoute`'s `buildPrompt` return (dograting). Omitted → `global` is not passed at all; supabase-js uses global fetch, byte-identical to before. Gateway providers ignore it. NB: a guard that throws still burns the upload's 3-attempt retry backoff (~6s) before surfacing — loud, not silent. Shipped `2b48478`; wired in furrybooth (`75a2b6c`, exports `guardedServerFetch`) and dograting (`c1802d7`, `guardedSupabaseFetch` in both buildPrompt branches). |
 
 ---
 
