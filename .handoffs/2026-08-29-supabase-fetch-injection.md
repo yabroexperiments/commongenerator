@@ -61,9 +61,14 @@
 
 ## Left / not in scope
 
-- **gogo-gallery / gogolinesticker**: no live-guard module yet, so there is no
-  guarded fetch to pass — wiring `supabaseFetch` there belongs to each repo's
-  live-guard rollout (FACTS.md §87 coverage table), not to this change.
+- ~~gogo-gallery / gogolinesticker: no live-guard module yet~~ **CLOSED later
+  the same session (2026-08-29 pm, AC asked):** gogolinesticker already had the
+  module (PR #10) — it gained the engine bump + `supabaseFetch` at both submit
+  sites + the missing paid guard on the admin test-master route + `npm ci`
+  installCommand (`6dec338`, deployed READY). gogo-gallery got the full port
+  (module + gate + wiring + engine bump) as a LOCAL-ONLY commit `45ebd2f` —
+  its GitHub repo is archived and rejects pushes (server-verified). All four
+  consumers now covered; FACTS.md §87 updated.
 - The blocked-write path burns the engine's 3 upload retries (~6s) before
   throwing. Acceptable (guard blocks are rare + local-only); if it ever
   matters, teach `uploadResultToSupabase` to treat a `[live-guard]` error as
