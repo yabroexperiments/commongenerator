@@ -42,6 +42,9 @@ import type {
 import type { FetchLike } from "../types";
 
 const OPENAI_EDITS_URL = "https://api.openai.com/v1/images/edits";
+/** Model sent when SubmitOpts.model is omitted — this provider's historical
+ *  (and only, before 2026-10-02) model. */
+export const DEFAULT_OPENAI_IMAGE_MODEL = "gpt-image-2";
 
 function getRequiredEnv(name: string, fallback?: string): string {
   const v = process.env[name] ?? (fallback ? process.env[fallback] : undefined);
@@ -192,8 +195,12 @@ async function submitOpenAi(opts: SubmitOpts): Promise<SubmitResult> {
     allSources.map((url) => downloadSourceImage(url)),
   );
 
+  // Default gpt-image-2 — a caller that omits `model` sends exactly what
+  // this provider always sent. Consumers choose another OpenAI image model
+  // (e.g. gpt-image-2.5-flare) per call; validating the name is theirs.
+  const model = opts.model?.trim() || DEFAULT_OPENAI_IMAGE_MODEL;
   const fd = new FormData();
-  fd.append("model", "gpt-image-2");
+  fd.append("model", model);
   // Single-image: use the `image` field name (back-compat with previous
   // single-image behavior). Multi-image: use repeated `image[]` fields
   // per OpenAI's documented multi-input form for gpt-image-2.
@@ -228,7 +235,7 @@ async function submitOpenAi(opts: SubmitOpts): Promise<SubmitResult> {
   if (!aiRes.ok) {
     const text = await aiRes.text();
     throw new Error(
-      `OpenAI gpt-image-2 ${aiRes.status}: ${text.slice(0, 500)}`,
+      `OpenAI ${model} ${aiRes.status}: ${text.slice(0, 500)}`,
     );
   }
   const json = (await aiRes.json()) as {
