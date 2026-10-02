@@ -67,6 +67,12 @@ export type SubmitOpts = {
    *  true) keeps the rewrite. Threaded from StartGenerationInput; other
    *  providers ignore it. */
   rewriteCloudinarySource?: boolean;
+  /** OpenAI image model for openai-gpt-image-2 (the `model` form field on
+   *  /v1/images/edits), e.g. "gpt-image-2.5-flare". Default (undefined /
+   *  empty) → "gpt-image-2", byte-identical to the provider's historical
+   *  request. Not validated here — the consumer owns its allowlist. Other
+   *  providers ignore it (their model is fixed by the provider name). */
+  model?: string;
   /** Optional fetch for the internal Supabase Storage client that
    *  openai-gpt-image-2 constructs from env vars to archive its result
    *  PNG — the one engine write that bypasses the consumer's own `sb`.
